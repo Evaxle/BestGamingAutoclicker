@@ -46,7 +46,13 @@ class AutoClickerWindow(ctk.CTk):
             raise tk.TclError("No display available; start the GUI on a desktop session or set DISPLAY.")
         super().__init__()
         ctk.set_appearance_mode("dark")
-        ctk.set_default_color_theme("dark-purple")
+        try:
+            ctk.set_default_color_theme("dark-blue")
+        except Exception:
+            try:
+                ctk.set_default_color_theme("blue")
+            except Exception:
+                pass
 
         self.title("Autoclicker")
         self.geometry("820x700")

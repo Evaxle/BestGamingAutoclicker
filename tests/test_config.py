@@ -84,6 +84,7 @@ class ConfigTests(unittest.TestCase):
         content = launcher_path.read_text(encoding="utf-8")
         self.assertIn("gui.py", content)
         self.assertIn("requirements.txt", content)
+        self.assertIn("-3w", content)
 
     def test_main_exits_cleanly_without_display(self):
         import gui
