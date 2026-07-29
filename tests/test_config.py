@@ -78,6 +78,13 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(payload["Settings"]["mode"], "hold")
             self.assertEqual(payload["Settings"]["trigger_cps"], "8")
 
+    def test_windows_launcher_script_exists(self):
+        launcher_path = Path(__file__).resolve().parent.parent / "run_gui.bat"
+        self.assertTrue(launcher_path.exists())
+        content = launcher_path.read_text(encoding="utf-8")
+        self.assertIn("gui.py", content)
+        self.assertIn("requirements.txt", content)
+
     def test_main_exits_cleanly_without_display(self):
         import gui
 
