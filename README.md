@@ -1,26 +1,56 @@
-# The Best autoclicker autohotkey Script
+# Best Gaming AutoClicker
 
-Autoclicker autohotkey script.
+A modern profile-based autoclicker project with a polished Python GUI and a lightweight AutoHotkey core for actual clicking behavior.
+
+## What changed
+
+- Added a Python-based GUI built with CustomTkinter for a modern desktop experience.
+- Moved profile and settings handling into Python so the GUI manages data consistently.
+- Kept the clicking logic in the AutoHotkey script, with no GUI built into the AHK file.
+- Added validation for settings and profile loading.
 
 ## Requirements
 
-1. Download and install **AutoHotkey v2** from the official website:
+### Windows
+- Install Python 3.10+ from https://www.python.org/downloads/windows/
+- Install AutoHotkey v2 from https://www.autohotkey.com/
+- Open Command Prompt in the project folder and run:
 
-   * https://www.autohotkey.com/
+```bat
+py -3 -m pip install --upgrade pip
+py -3 -m pip install -r requirements.txt
+```
 
-## Setup
+## Run the GUI
 
-1. Download or clone this repository.
-2. Make sure AutoHotkey v2 is installed.
-3. Double-click the `.ahk` file to run the script.
+From the project folder you can use either of these:
 
-## Optional
+```bat
+py -3 gui.py
+```
 
-To have the script start automatically with Windows, place a shortcut to the `.ahk` file in your Windows **Startup** folder.
+or simply double-click:
 
-## Need Help?
+```bat
+run_gui.bat
+```
 
-If the script doesn't run:
+The GUI will save settings into the `data/` folder as profile files and write an active profile marker for the AHK script.
 
-* Make sure you're using the correct autohotkey version.
-* Check that the script file has the `.ahk` extension.
+## Run the AutoHotkey script directly
+
+Double-click the `.ahk` file or launch it from AutoHotkey on Windows.
+
+## Validation
+
+The Python config layer includes regression tests.
+
+```bash
+python -m unittest discover -s tests -q
+```
+
+## Notes
+
+- The default profile is protected from deletion.
+- The AHK script does not create or display a GUI; it only performs the click automation based on the Python-managed profile data.
+- On non-Windows systems, launching the AHK script is simulated because AutoHotkey is Windows-only.
