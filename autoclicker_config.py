@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
-import configparser
-from typing import List, Dict
+from typing import Dict, List
 
 
 @dataclass
@@ -89,24 +89,24 @@ def load_config(profile_path: Path | str) -> AppConfig:
     if not path.exists():
         return sanitize_config(DEFAULT_CONFIG)
 
-    parser = configparser.ConfigParser()
-    parser.read(path, encoding="utf-8")
-    section = "Settings"
-    if not parser.has_section(section):
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
         return sanitize_config(DEFAULT_CONFIG)
 
+    settings = payload.get("Settings", {}) if isinstance(payload, dict) else {}
     config = AppConfig(
         profile_name=path.stem,
-        mode=parser.get(section, "mode", fallback=DEFAULT_CONFIG.mode),
-        trigger_cps=parser.getint(section, "trigger_cps", fallback=DEFAULT_CONFIG.trigger_cps),
-        turbo_cps=parser.getint(section, "turbo_cps", fallback=DEFAULT_CONFIG.turbo_cps),
-        stop_delay=parser.getint(section, "stop_delay", fallback=DEFAULT_CONFIG.stop_delay),
-        hold_delay=parser.getint(section, "hold_delay", fallback=DEFAULT_CONFIG.hold_delay),
-        dbl_interval=parser.getint(section, "dbl_interval", fallback=DEFAULT_CONFIG.dbl_interval),
-        hold_activation=parser.get(section, "hold_activation", fallback=DEFAULT_CONFIG.hold_activation),
-        wait_button=parser.get(section, "wait_button", fallback=""),
-        wait_enabled=parser.getboolean(section, "wait_enabled", fallback=False),
-        universal_enabled=parser.getboolean(section, "universal_enabled", fallback=False),
+        mode=settings.get("mode", DEFAULT_CONFIG.mode),
+        trigger_cps=int(settings.get("trigger_cps", DEFAULT_CONFIG.trigger_cps)),
+        turbo_cps=int(settings.get("turbo_cps", DEFAULT_CONFIG.turbo_cps)),
+        stop_delay=int(settings.get("stop_delay", DEFAULT_CONFIG.stop_delay)),
+        hold_delay=int(settings.get("hold_delay", DEFAULT_CONFIG.hold_delay)),
+        dbl_interval=int(settings.get("dbl_interval", DEFAULT_CONFIG.dbl_interval)),
+        hold_activation=settings.get("hold_activation", DEFAULT_CONFIG.hold_activation),
+        wait_button=settings.get("wait_button", ""),
+        wait_enabled=_coerce_bool(settings.get("wait_enabled", False)),
+        universal_enabled=_coerce_bool(settings.get("universal_enabled", False)),
     )
     return sanitize_config(config)
 
@@ -115,50 +115,53 @@ def save_config(profile_path: Path | str, config: AppConfig) -> None:
     path = Path(profile_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     safe_config = sanitize_config(config)
-    parser = configparser.ConfigParser()
-    parser["Settings"] = {
-        "mode": safe_config.mode,
-        "trigger_cps": str(safe_config.trigger_cps),
-        "turbo_cps": str(safe_config.turbo_cps),
-        "stop_delay": str(safe_config.stop_delay),
-        "hold_delay": str(safe_config.hold_delay),
-        "dbl_interval": str(safe_config.dbl_interval),
-        "hold_activation": safe_config.hold_activation,
-        "wait_button": safe_config.wait_button,
-        "wait_enabled": "1" if safe_config.wait_enabled else "0",
-        "universal_enabled": "1" if safe_config.universal_enabled else "0",
+    payload = {
+        "Settings": {
+            "mode": safe_config.mode,
+            "trigger_cps": str(safe_config.trigger_cps),
+            "turbo_cps": str(safe_config.turbo_cps),
+            "stop_delay": str(safe_config.stop_delay),
+            "hold_delay": str(safe_config.hold_delay),
+            "dbl_interval": str(safe_config.dbl_interval),
+            "hold_activation": safe_config.hold_activation,
+            "wait_button": safe_config.wait_button,
+            "wait_enabled": "1" if safe_config.wait_enabled else "0",
+            "universal_enabled": "1" if safe_config.universal_enabled else "0",
+        }
     }
     with path.open("w", encoding="utf-8") as handle:
-        parser.write(handle)
+        json.dump(payload, handle, indent=2)
 
 
 def save_runtime_state(data_dir: Path | str, *, enabled: bool, profile_name: str) -> None:
     directory = Path(data_dir)
     directory.mkdir(parents=True, exist_ok=True)
-    state_path = directory / "runtime_state.ini"
-    parser = configparser.ConfigParser()
-    parser["Runtime"] = {
-        "enabled": "1" if enabled else "0",
-        "profile_name": profile_name or "default",
+    state_path = directory / "runtime_state.json"
+    payload = {
+        "Runtime": {
+            "enabled": "1" if enabled else "0",
+            "profile_name": profile_name or "default",
+        }
     }
     with state_path.open("w", encoding="utf-8") as handle:
-        parser.write(handle)
+        json.dump(payload, handle, indent=2)
 
 
 def load_runtime_state(data_dir: Path | str) -> Dict[str, object]:
     directory = Path(data_dir)
-    state_path = directory / "runtime_state.ini"
+    state_path = directory / "runtime_state.json"
     if not state_path.exists():
         return {"enabled": False, "profile_name": "default"}
 
-    parser = configparser.ConfigParser()
-    parser.read(state_path, encoding="utf-8")
-    if not parser.has_section("Runtime"):
+    try:
+        payload = json.loads(state_path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
         return {"enabled": False, "profile_name": "default"}
 
+    runtime = payload.get("Runtime", {}) if isinstance(payload, dict) else {}
     return {
-        "enabled": parser.getboolean("Runtime", "enabled", fallback=False),
-        "profile_name": parser.get("Runtime", "profile_name", fallback="default"),
+        "enabled": _coerce_bool(runtime.get("enabled", False)),
+        "profile_name": runtime.get("profile_name", "default"),
     }
 
 
@@ -166,11 +169,17 @@ def list_profiles(data_dir: Path | str) -> List[str]:
     directory = Path(data_dir)
     if not directory.exists():
         return ["default"]
-    profiles = [path.stem for path in directory.glob("*.ini") if path.stem != "default"]
-    return ["default", *sorted(profiles)]
+
+    profiles: List[str] = []
+    for path in sorted(directory.glob("*.json")):
+        stem = path.stem
+        if stem in {"default", "runtime_state"}:
+            continue
+        profiles.append(stem)
+    return ["default", *profiles]
 
 
 def profile_path(data_dir: Path | str, profile_name: str) -> Path:
     directory = Path(data_dir)
     directory.mkdir(parents=True, exist_ok=True)
-    return directory / f"{profile_name}.ini"
+    return directory / f"{profile_name}.json"

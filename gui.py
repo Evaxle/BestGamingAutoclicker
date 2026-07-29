@@ -1,14 +1,25 @@
 from __future__ import annotations
 
 import os
-import shutil
-import subprocess
 import sys
+import threading
+import time
 import tkinter as tk
 from pathlib import Path
 from tkinter import messagebox, simpledialog
 
 import customtkinter as ctk
+
+try:
+    from pynput import keyboard as pynput_keyboard, mouse as pynput_mouse
+except Exception:  # pragma: no cover - headless fallback
+    pynput_keyboard = None
+    pynput_mouse = None
+
+try:
+    import pyautogui
+except Exception:  # pragma: no cover - headless fallback
+    pyautogui = None
 
 from autoclicker_config import (
     AppConfig,
@@ -23,13 +34,13 @@ from autoclicker_config import (
 )
 
 
-class ModernAutoClickerWindow(ctk.CTk):
+class AutoClickerWindow(ctk.CTk):
     def __init__(self) -> None:
         super().__init__()
         ctk.set_appearance_mode("dark")
-        ctk.set_default_color_theme("dark-blue")
+        ctk.set_default_color_theme("dark-purple")
 
-        self.title("Turbo AutoClicker")
+        self.title("Autoclicker")
         self.geometry("820x700")
         self.minsize(760, 640)
 
@@ -37,13 +48,26 @@ class ModernAutoClickerWindow(ctk.CTk):
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.current_profile = "default"
         self.config = sanitize_config(AppConfig(profile_name=self.current_profile))
-        self.profile_buttons: list[ctk.CTkButton] = []
+        self._ensure_default_profile_data()
         self.runtime_state = load_runtime_state(self.data_dir)
+        self._mode_value = "spam"
+        self._hold_mode_value = "normal"
+        self._clicking = False
+        self._left_button_down = False
+        self._right_button_down = False
+        self._pressed_keys: set[str] = set()
+        self._hold_since: float | None = None
+        self._double_click_ready = False
+        self._last_click_time = 0.0
+        self._click_thread: threading.Thread | None = None
+        self._mouse_listener = None
+        self._keyboard_listener = None
 
         self._build_ui()
         self._load_profiles()
         self._apply_config_to_form()
         self._apply_runtime_state()
+        self._start_input_listeners()
 
     def _build_ui(self) -> None:
         self.grid_columnconfigure(0, weight=1)
@@ -53,10 +77,10 @@ class ModernAutoClickerWindow(ctk.CTk):
         self.main_frame.grid(row=0, column=0, sticky="nsew", padx=20, pady=20)
         self.main_frame.grid_columnconfigure(0, weight=1)
 
-        title = ctk.CTkLabel(self.main_frame, text="Modern AutoClicker", font=("Segoe UI", 24, "bold"))
+        title = ctk.CTkLabel(self.main_frame, text="Autoclicker", font=("Segoe UI", 24, "bold"))
         title.grid(row=0, column=0, sticky="w", pady=(10, 4))
 
-        subtitle = ctk.CTkLabel(self.main_frame, text="Profile-driven automation with a modern control panel", text_color="gray70")
+        subtitle = ctk.CTkLabel(self.main_frame, text="Python-powered autoclicking with profile-based settings", text_color="gray70")
         subtitle.grid(row=1, column=0, sticky="w", pady=(0, 12))
 
         self.status_var = tk.StringVar(value="Idle")
@@ -67,9 +91,9 @@ class ModernAutoClickerWindow(ctk.CTk):
         self.profile_frame.grid(row=3, column=0, sticky="ew", padx=4, pady=6)
         self.profile_frame.grid_columnconfigure(0, weight=1)
         ctk.CTkLabel(self.profile_frame, text="Profiles", font=("Segoe UI", 15, "bold")).grid(row=0, column=0, sticky="w", padx=12, pady=(8, 6))
-        self.profile_button_frame = ctk.CTkFrame(self.profile_frame, fg_color="transparent")
-        self.profile_button_frame.grid(row=1, column=0, sticky="ew", padx=12, pady=(0, 6))
-        self.profile_button_frame.grid_columnconfigure(0, weight=1)
+        self.profile_selector = ctk.CTkComboBox(self.profile_frame, values=["default"], state="readonly")
+        self.profile_selector.grid(row=1, column=0, sticky="ew", padx=12, pady=(0, 6))
+        self.profile_selector.bind("<<ComboboxSelected>>", lambda _event: self._select_profile(self.profile_selector.get()))
 
         profile_actions = ctk.CTkFrame(self.profile_frame, fg_color="transparent")
         profile_actions.grid(row=2, column=0, sticky="ew", padx=12, pady=(0, 10))
@@ -137,41 +161,59 @@ class ModernAutoClickerWindow(ctk.CTk):
         self.start_button = ctk.CTkButton(buttons_frame, text="Start", command=self._start_runtime)
         self.start_button.grid(row=0, column=1, padx=(0, 8))
         self.stop_button = ctk.CTkButton(buttons_frame, text="Stop", command=self._stop_runtime)
-        self.stop_button.grid(row=0, column=2, padx=(0, 8))
-        ctk.CTkButton(buttons_frame, text="Launch AHK", command=self._launch_ahk).grid(row=0, column=3)
+        self.stop_button.grid(row=0, column=2)
 
         self._update_mode_visibility()
 
+    def _start_input_listeners(self) -> None:
+        if pynput_mouse is None or pynput_keyboard is None:
+            return
+        self._mouse_listener = pynput_mouse.Listener(on_click=self._on_mouse_click)
+        self._mouse_listener.start()
+        self._keyboard_listener = pynput_keyboard.Listener(on_press=self._on_key_press, on_release=self._on_key_release)
+        self._keyboard_listener.start()
+
+    def _on_mouse_click(self, x: int, y: int, button: object, pressed: bool) -> None:
+        if button == pynput_mouse.Button.left:
+            self._left_button_down = pressed
+            if not pressed:
+                self._hold_since = None
+                self._double_click_ready = False
+        elif button == pynput_mouse.Button.right:
+            self._right_button_down = pressed
+
+    def _on_key_press(self, key: object) -> None:
+        try:
+            self._pressed_keys.add(key.char.lower())
+        except AttributeError:
+            self._pressed_keys.add(str(key).replace("'", ""))
+
+    def _on_key_release(self, key: object) -> None:
+        try:
+            self._pressed_keys.discard(key.char.lower())
+        except AttributeError:
+            self._pressed_keys.discard(str(key).replace("'", ""))
+
+    def _ensure_default_profile_data(self) -> None:
+        default_profile_path = profile_path(self.data_dir, "default")
+        if not default_profile_path.exists():
+            save_config(default_profile_path, sanitize_config(AppConfig(profile_name="default")))
+
+        runtime_state_path = self.data_dir / "runtime_state.json"
+        if not runtime_state_path.exists():
+            save_runtime_state(self.data_dir, enabled=False, profile_name="default")
+
     def _load_profiles(self) -> None:
-        for button in self.profile_buttons:
-            button.destroy()
-        self.profile_buttons.clear()
-
         profiles = list_profiles(self.data_dir)
-        for profile_name in profiles:
-            button = ctk.CTkButton(self.profile_button_frame, text=profile_name, width=90, command=lambda name=profile_name: self._select_profile(name))
-            button.grid(row=0, column=len(self.profile_buttons), padx=4, pady=4)
-            self.profile_buttons.append(button)
-
+        self.profile_selector.configure(values=profiles)
         if self.current_profile in profiles:
-            self._set_profile_button_state(self.current_profile)
+            self.profile_selector.set(self.current_profile)
         else:
-            self._set_profile_button_state("default")
-
-    def _set_profile_button_state(self, profile_name: str) -> None:
-        for button in self.profile_buttons:
-            selected = button.cget("text") == profile_name
-            self._set_toggle_button_state(button, selected)
-
-    def _set_toggle_button_state(self, button: ctk.CTkButton, selected: bool) -> None:
-        if selected:
-            button.configure(fg_color="#2563eb", hover_color="#1e40af")
-        else:
-            button.configure(fg_color=("#2b2b2b", "#1f1f1f"), hover_color=("#3b3b3b", "#2a2a2a"))
+            self.profile_selector.set("default")
+            self.current_profile = "default"
 
     def _select_profile(self, profile_name: str) -> None:
         self.current_profile = profile_name
-        self._set_profile_button_state(profile_name)
         self.config = load_config(profile_path(self.data_dir, profile_name))
         self._apply_config_to_form()
 
@@ -195,26 +237,34 @@ class ModernAutoClickerWindow(ctk.CTk):
         self._update_mode_visibility()
 
     def _set_mode_selection(self, mode: str) -> None:
+        self._mode_value = mode
         is_hold = mode == "hold"
         self._set_toggle_button_state(self.mode_spam_button, not is_hold)
         self._set_toggle_button_state(self.mode_hold_button, is_hold)
         self._update_mode_visibility()
 
     def _set_hold_mode_selection(self, hold_mode: str) -> None:
+        self._hold_mode_value = hold_mode
         is_double = hold_mode == "double-click"
         self._set_toggle_button_state(self.hold_normal_button, not is_double)
         self._set_toggle_button_state(self.hold_double_button, is_double)
 
+    def _set_toggle_button_state(self, button: ctk.CTkButton, selected: bool) -> None:
+        if selected:
+            button.configure(fg_color="#7c3aed", hover_color="#6d28d9")
+        else:
+            button.configure(fg_color=("#2b2b2b", "#1f1f1f"), hover_color=("#3b3b3b", "#2a2a2a"))
+
     def _collect_config(self) -> AppConfig:
         config = AppConfig(
             profile_name=self.current_profile,
-            mode="hold" if self.mode_hold_button.cget("fg_color") == "#2563eb" else "spam",
+            mode=self._mode_value,
             trigger_cps=int(self.trigger_spin.get() or 0),
             turbo_cps=int(self.turbo_spin.get() or 0),
             stop_delay=int(self.stop_spin.get() or 0),
             hold_delay=int(self.hold_spin.get() or 0),
             dbl_interval=int(self.dbl_spin.get() or 0),
-            hold_activation="double-click" if self.hold_double_button.cget("fg_color") == "#2563eb" else "normal",
+            hold_activation=self._hold_mode_value,
             wait_button=self.wait_button_edit.get().strip(),
             wait_enabled=self.wait_enabled_checkbox.get() == 1,
             universal_enabled=self.enable_checkbox.get() == 1,
@@ -233,7 +283,6 @@ class ModernAutoClickerWindow(ctk.CTk):
         save_config(target, sanitize_config(AppConfig(profile_name=profile)))
         self.current_profile = profile
         self._load_profiles()
-        self._set_profile_button_state(profile)
         self._set_status("Created profile")
 
     def _delete_profile(self) -> None:
@@ -245,7 +294,6 @@ class ModernAutoClickerWindow(ctk.CTk):
             path.unlink()
         self.current_profile = "default"
         self._load_profiles()
-        self._set_profile_button_state("default")
         self.config = load_config(profile_path(self.data_dir, self.current_profile))
         self._apply_config_to_form()
 
@@ -270,7 +318,7 @@ class ModernAutoClickerWindow(ctk.CTk):
         self.status_var.set(message)
 
     def _update_mode_visibility(self) -> None:
-        is_hold = self.mode_hold_button.cget("fg_color") == "#2563eb"
+        is_hold = self._mode_value == "hold"
         self._set_widget_visibility(self.trigger_spin, not is_hold)
         self._set_widget_visibility(self.turbo_spin, not is_hold)
         self._set_widget_visibility(self.stop_spin, not is_hold)
@@ -291,7 +339,7 @@ class ModernAutoClickerWindow(ctk.CTk):
         profile_name = self.runtime_state.get("profile_name", "default")
         if profile_name in list_profiles(self.data_dir):
             self.current_profile = profile_name
-            self._set_profile_button_state(profile_name)
+            self.profile_selector.set(profile_name)
             self.config = load_config(profile_path(self.data_dir, profile_name))
             self._apply_config_to_form()
 
@@ -310,39 +358,74 @@ class ModernAutoClickerWindow(ctk.CTk):
         save_runtime_state(self.data_dir, enabled=True, profile_name=self.current_profile)
         self.runtime_state = load_runtime_state(self.data_dir)
         self._apply_runtime_state()
+        self._start_python_clicker()
         self._set_status("Runtime started")
 
     def _stop_runtime(self) -> None:
         save_runtime_state(self.data_dir, enabled=False, profile_name=self.current_profile)
         self.runtime_state = load_runtime_state(self.data_dir)
         self._apply_runtime_state()
+        self._stop_python_clicker()
         self._set_status("Runtime stopped")
 
-    def _launch_ahk(self) -> None:
-        self.config = self._collect_config()
-        errors = validate_settings(self.config)
-        if errors:
-            messagebox.showwarning("Invalid Settings", f"These values need attention: {', '.join(errors)}")
+    def _start_python_clicker(self) -> None:
+        if self._click_thread and self._click_thread.is_alive():
             return
-        save_config(profile_path(self.data_dir, self.current_profile), self.config)
-        self._write_active_profile(self.current_profile)
-        save_runtime_state(self.data_dir, enabled=True, profile_name=self.current_profile)
-        self.runtime_state = load_runtime_state(self.data_dir)
-        self._apply_runtime_state()
-        script_path = Path(__file__).resolve().parent / "autoclicker.ahk"
-        if not script_path.exists():
-            messagebox.showerror("Missing Script", "The AutoHotkey file was not found.")
+        self._clicking = True
+        self._click_thread = threading.Thread(target=self._python_click_loop, daemon=True)
+        self._click_thread.start()
+
+    def _stop_python_clicker(self) -> None:
+        self._clicking = False
+
+    def _wait_requirements_met(self) -> bool:
+        if not self.config.wait_enabled or not self.config.wait_button:
+            return True
+        button_name = self.config.wait_button.strip().lower()
+        if button_name in {"lbutton", "left", "mouse1"}:
+            return self._left_button_down
+        if button_name in {"rbutton", "right", "mouse2"}:
+            return self._right_button_down
+        return button_name in self._pressed_keys
+
+    def _python_click_loop(self) -> None:
+        while self._clicking:
+            time.sleep(0.01)
+            if not self._clicking:
+                break
+            if self._mode_value == "hold":
+                if self.config.hold_activation == "double-click":
+                    if self._left_button_down and self._double_click_ready:
+                        self._double_click_ready = False
+                        self._emit_click()
+                    elif self._left_button_down:
+                        now = time.time()
+                        if self._last_click_time and (now - self._last_click_time) <= (self.config.dbl_interval / 1000):
+                            self._double_click_ready = True
+                        self._last_click_time = now
+                    continue
+
+                if self._left_button_down and self._wait_requirements_met():
+                    if self._hold_since is None:
+                        self._hold_since = time.monotonic()
+                    if self._hold_since is not None and (time.monotonic() - self._hold_since) * 1000 >= self.config.hold_delay:
+                        self._emit_click()
+                        self._hold_since = time.monotonic()
+                else:
+                    self._hold_since = None
+                continue
+
+            if self._left_button_down and self._wait_requirements_met():
+                self._emit_click()
+                time.sleep(max(0.001, 1.0 / max(1, self.config.trigger_cps)))
+
+    def _emit_click(self) -> None:
+        if pyautogui is None:
             return
         try:
-            if os.name == "nt":
-                executable = shutil.which("AutoHotkeyU64.exe") or "AutoHotkeyU64.exe"
-                subprocess.Popen([executable, str(script_path)])
-                self._set_status("AutoHotkey launched")
-            else:
-                messagebox.showinfo("Platform Notice", "This GUI targets Windows AutoHotkey execution. Launching is only simulated on non-Windows systems.")
-                self._set_status("Launch simulated")
-        except Exception as exc:  # pragma: no cover
-            messagebox.showerror("Launch Failed", str(exc))
+            pyautogui.click()
+        except Exception:
+            pass
 
 
 def main() -> int:
@@ -351,7 +434,7 @@ def main() -> int:
         return 1
 
     try:
-        window = ModernAutoClickerWindow()
+        window = AutoClickerWindow()
     except tk.TclError as exc:
         print(f"Unable to start the GUI: {exc}")
         print("Make sure Tk/Tcl is installed and you are running in a desktop session.")

@@ -1,4 +1,5 @@
 import io
+import json
 import os
 import tempfile
 import unittest
@@ -7,6 +8,7 @@ from unittest.mock import patch
 
 from autoclicker_config import (
     AppConfig,
+    list_profiles,
     load_config,
     load_runtime_state,
     save_config,
@@ -55,11 +57,26 @@ class ConfigTests(unittest.TestCase):
             self.assertTrue(state["enabled"])
             self.assertEqual(state["profile_name"], "test")
 
-    def test_autohotkey_script_is_headless(self):
-        script_path = Path(__file__).resolve().parents[1] / "autoclicker.ahk"
-        content = script_path.read_text(encoding="utf-8")
-        self.assertNotIn("GuiControl", content)
-        self.assertIn("runtime_state.ini", content)
+    def test_list_profiles_ignores_runtime_state_file(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            data_dir = Path(tmp_dir)
+            save_runtime_state(data_dir, enabled=True, profile_name="demo")
+            save_config(data_dir / "demo.json", AppConfig(mode="hold", trigger_cps=8))
+
+            profiles = list_profiles(data_dir)
+            self.assertIn("default", profiles)
+            self.assertIn("demo", profiles)
+            self.assertNotIn("runtime_state", profiles)
+
+    def test_profile_data_is_stored_as_json(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            profile_path = Path(tmp_dir) / "demo.json"
+            save_config(profile_path, AppConfig(mode="hold", trigger_cps=8))
+
+            self.assertTrue(profile_path.exists())
+            payload = json.loads(profile_path.read_text(encoding="utf-8"))
+            self.assertEqual(payload["Settings"]["mode"], "hold")
+            self.assertEqual(payload["Settings"]["trigger_cps"], "8")
 
     def test_main_exits_cleanly_without_display(self):
         import gui
