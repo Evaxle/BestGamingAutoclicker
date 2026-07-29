@@ -8,6 +8,12 @@ import tkinter as tk
 from pathlib import Path
 from tkinter import messagebox, simpledialog
 
+
+def _is_headless_environment() -> bool:
+    if os.name == "nt":
+        return False
+    return not os.environ.get("DISPLAY")
+
 import customtkinter as ctk
 
 try:
@@ -36,6 +42,8 @@ from autoclicker_config import (
 
 class AutoClickerWindow(ctk.CTk):
     def __init__(self) -> None:
+        if _is_headless_environment():
+            raise tk.TclError("No display available; start the GUI on a desktop session or set DISPLAY.")
         super().__init__()
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("dark-purple")
@@ -429,7 +437,7 @@ class AutoClickerWindow(ctk.CTk):
 
 
 def main() -> int:
-    if os.name != "nt" and not os.environ.get("DISPLAY"):
+    if _is_headless_environment():
         print("No display available; start the GUI on a desktop session or set DISPLAY.")
         return 1
 
