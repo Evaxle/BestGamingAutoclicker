@@ -23,11 +23,6 @@ except Exception:  # pragma: no cover - headless fallback
     pynput_keyboard = None
     pynput_mouse = None
 
-try:
-    import pyautogui
-except Exception:  # pragma: no cover - headless fallback
-    pyautogui = None
-
 from autoclicker_config import (
     AppConfig,
     list_profiles,
@@ -38,6 +33,12 @@ from autoclicker_config import (
     save_runtime_state,
     sanitize_config,
     validate_settings,
+)
+
+from dll_wrapper import (
+    AutoClickerDLL,
+    get_clicker,
+    try_load_clicker,
 )
 
 # ── Purple color palette ──────────────────────────────────────────────
@@ -174,25 +175,44 @@ class AutoClickerWindow(ctk.CTk):
         self._ensure_default_profile_data()
         self.runtime_state = load_runtime_state(self.data_dir)
 
-        # ── Internal state ─────────────────────────────────────────────
+# ── Internal state ─────────────────────────────────────────────
         self._mode_value = "spam"
         self._hold_mode_value = "normal"
-        self._clicking_event = threading.Event()  # replaces _clicking bool
-        self._clicking_event.clear()
+        self._clicking_enabled = False        # whether DLL is started
         self._left_button_down = False
         self._right_button_down = False
         self._pressed_keys: set[str] = set()
-        self._left_was_down = False  # for edge detection in double-click
+        self._unsaved_changes = False
+
+        # ── Python fallback clicker state (used when DLL unavailable) ─
+        self._clicking_event = threading.Event()
+        self._clicking_event.clear()
+        self._click_thread: threading.Thread | None = None
+        self._left_was_down = False
         self._hold_since: float | None = None
         self._double_click_armed = False
-        self._last_click_time = 0.0
-        self._click_thread: threading.Thread | None = None
+        self._idle_timeout = 60.0
+
+# ── Native DLL Clicker Engine ──────────────────────────────────
+        self._dll_clicker: AutoClickerDLL = get_clicker()
+        self._dll_loaded = try_load_clicker()
+        self._dll_load_message = ""
+        if self._dll_loaded:
+            self._dll_load_message = "Native clicker DLL loaded successfully"
+        else:
+            self._dll_load_message = (
+                f"Native DLL not available: {self._dll_clicker.get_load_error()}. "
+                "Falling back to Python pyautogui clicker."
+            )
+
         self._mouse_listener = None
         self._keyboard_listener = None
         self._unsaved_changes = False
-        self._idle_timeout = 60.0  # seconds before auto-stop safety
 
         self._build_ui()
+        if self._dll_load_message:
+            level = "SUCCESS" if self._dll_loaded else "WARNING"
+            self.console_log.write(self._dll_load_message, level)
         self._load_profiles()
         self._apply_config_to_form()
         self._apply_runtime_state()
@@ -610,25 +630,44 @@ class AutoClickerWindow(ctk.CTk):
         self, x: int, y: int, button: object, pressed: bool
     ) -> None:
         if button == pynput_mouse.Button.left:
-            self._left_was_down = self._left_button_down
             self._left_button_down = pressed
-            if not pressed:
-                self._hold_since = None
-                self._double_click_armed = True
         elif button == pynput_mouse.Button.right:
             self._right_button_down = pressed
+        self._push_input_state_to_dll()
 
     def _on_key_press(self, key: object) -> None:
         try:
             self._pressed_keys.add(key.char.lower())
         except AttributeError:
             self._pressed_keys.add(str(key).replace("'", ""))
+        self._push_input_state_to_dll()
 
     def _on_key_release(self, key: object) -> None:
         try:
             self._pressed_keys.discard(key.char.lower())
         except AttributeError:
             self._pressed_keys.discard(str(key).replace("'", ""))
+        self._push_input_state_to_dll()
+
+    def _push_input_state_to_dll(self) -> None:
+        """Push the latest mouse/keyboard state into the native DLL."""
+        if not self._dll_loaded:
+            return
+        # Determine if the "wait" key is pressed
+        wait_key_down = False
+        if self.config.wait_enabled and self.config.wait_button:
+            btn = self.config.wait_button.strip().lower()
+            if btn in {"lbutton", "left", "mouse1"}:
+                wait_key_down = self._left_button_down
+            elif btn in {"rbutton", "right", "mouse2"}:
+                wait_key_down = self._right_button_down
+            else:
+                wait_key_down = btn in self._pressed_keys
+        self._dll_clicker.set_input_state(
+            left_down=self._left_button_down,
+            right_down=self._right_button_down,
+            wait_key_down=wait_key_down,
+        )
 
     # ── Profile & Data Management ─────────────────────────────────────
 
@@ -655,7 +694,7 @@ class AutoClickerWindow(ctk.CTk):
     def _on_profile_select(self, profile_name: str) -> None:
         """Handle profile switching – stop clicker, prompt unsaved, load."""
         # Auto-stop the clicker when switching profiles
-        if self._clicking_event.is_set():
+        if self._clicking_enabled:
             self._stop_runtime_internal()
             self._set_status("⏸ Stopped – profile changed")
             self.console_log.write(f"Auto-stopped clicker due to profile switch", "WARNING")
@@ -797,7 +836,7 @@ class AutoClickerWindow(ctk.CTk):
             messagebox.showinfo("Protected", "The default profile cannot be deleted.")
             return
         # Stop if running
-        if self._clicking_event.is_set():
+        if self._clicking_enabled:
             self._stop_runtime_internal()
         # Confirm
         if not messagebox.askyesno(
@@ -866,7 +905,7 @@ class AutoClickerWindow(ctk.CTk):
     def _on_edit(self, callback=None) -> None:
         """Called when the user starts editing any setting."""
         # Auto-stop the clicker when user changes settings
-        if self._clicking_event.is_set():
+        if self._clicking_enabled:
             self._stop_runtime_internal()
             self._set_status("⏸ Auto-stopped – settings changed")
             self.console_log.write("Auto-stopped clicker due to settings change", "WARNING")
@@ -880,10 +919,26 @@ class AutoClickerWindow(ctk.CTk):
         if callback:
             callback()
 
-    # ── Runtime Toggle ────────────────────────────────────────────────
+    # ── DLL Update & Runtime Toggle ──────────────────────────────────
+
+    def _sync_config_to_dll(self) -> None:
+        """Push the current GUI config into the native DLL."""
+        if not self._dll_loaded:
+            return
+        self._dll_clicker.update_config_from_app(
+            trigger_cps=self.config.trigger_cps,
+            turbo_cps=self.config.turbo_cps,
+            stop_delay=self.config.stop_delay,
+            hold_delay=self.config.hold_delay,
+            dbl_interval=self.config.dbl_interval,
+            mode=self.config.mode,
+            hold_activation=self.config.hold_activation,
+            wait_enabled=self.config.wait_enabled,
+            wait_button=self.config.wait_button,
+        )
 
     def _toggle_runtime(self) -> None:
-        if self._clicking_event.is_set():
+        if self._clicking_enabled:
             self._stop_runtime()
         else:
             self._start_runtime()
@@ -920,16 +975,38 @@ class AutoClickerWindow(ctk.CTk):
         )
         self.runtime_state = load_runtime_state(self.data_dir)
 
-        # Start clicker
-        self._start_python_clicker()
+        # ── Start the native DLL clicker ──────────────────────────────
+        if self._dll_loaded:
+            # Init DLL with current config
+            self._dll_clicker.init_from_app_config(
+                trigger_cps=self.config.trigger_cps,
+                turbo_cps=self.config.turbo_cps,
+                stop_delay=self.config.stop_delay,
+                hold_delay=self.config.hold_delay,
+                dbl_interval=self.config.dbl_interval,
+                mode=self.config.mode,
+                hold_activation=self.config.hold_activation,
+                wait_enabled=self.config.wait_enabled,
+                wait_button=self.config.wait_button,
+            )
+            # Push initial input state
+            self._push_input_state_to_dll()
+            # Start the native thread
+            self._dll_clicker.start()
+        else:
+            # Fallback: start Python-based clicker
+            self._start_python_clicker()
+
+        self._clicking_enabled = True
         self._unsaved_changes = False
         self._update_unsaved_indicator()
         self._update_toggle_ui(enabled=True)
-        mode_str = self._mode_value
+        engine = "DLL" if self._dll_loaded else "Python (fallback)"
+        mode_str = self.config.mode
         cps_str = self.config.trigger_cps if mode_str == "spam" else f"hold_delay={self.config.hold_delay}ms"
         self._set_status("▶ Running – clicker active")
         self.console_log.write(
-            f"Clicker STARTED | profile='{self.current_profile}' | mode={mode_str} | {cps_str}",
+            f"Clicker STARTED [engine={engine}] | profile='{self.current_profile}' | mode={mode_str} | {cps_str}",
             "SUCCESS",
         )
 
@@ -945,7 +1022,11 @@ class AutoClickerWindow(ctk.CTk):
 
     def _stop_runtime_internal(self) -> None:
         """Stop clicker without updating UI state (used internally)."""
-        self._stop_python_clicker()
+        if self._dll_loaded and self._clicking_enabled:
+            self._dll_clicker.stop()
+        else:
+            self._stop_python_clicker()
+        self._clicking_enabled = False
         self._update_toggle_ui(enabled=False)
 
     def _update_toggle_ui(self, enabled: bool) -> None:
