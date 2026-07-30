@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+import shutil
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 
 @dataclass
@@ -114,6 +116,11 @@ def load_config(profile_path: Path | str) -> AppConfig:
 def save_config(profile_path: Path | str, config: AppConfig) -> None:
     path = Path(profile_path)
     path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Create backup of existing profile before overwriting
+    if path.exists():
+        _backup_profile(path)
+
     safe_config = sanitize_config(config)
     payload = {
         "Settings": {
@@ -131,6 +138,32 @@ def save_config(profile_path: Path | str, config: AppConfig) -> None:
     }
     with path.open("w", encoding="utf-8") as handle:
         json.dump(payload, handle, indent=2)
+
+
+def _backup_profile(profile_path: Path) -> Optional[Path]:
+    """Create a timestamped backup of a profile JSON file."""
+    try:
+        backup_dir = profile_path.parent / "backups"
+        backup_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        backup_name = f"{profile_path.stem}_backup_{timestamp}.json"
+        backup_path = backup_dir / backup_name
+        shutil.copy2(profile_path, backup_path)
+        # Clean old backups (keep last 5 per profile)
+        _clean_old_backups(backup_dir, profile_path.stem, max_keep=5)
+        return backup_path
+    except (OSError, shutil.Error):
+        return None
+
+
+def _clean_old_backups(backup_dir: Path, profile_stem: str, max_keep: int = 5) -> None:
+    """Remove older backups for a profile, keeping only the latest `max_keep`."""
+    backups = sorted(backup_dir.glob(f"{profile_stem}_backup_*.json"), reverse=True)
+    for old_backup in backups[max_keep:]:
+        try:
+            old_backup.unlink()
+        except OSError:
+            pass
 
 
 def save_runtime_state(data_dir: Path | str, *, enabled: bool, profile_name: str) -> None:
