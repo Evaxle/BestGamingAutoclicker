@@ -12,6 +12,7 @@ import sys
 import threading
 from ctypes import (
     CDLL,
+    POINTER,
     Structure,
     c_char,
     c_double,
@@ -96,10 +97,10 @@ class AutoClickerDLL:
             self._load_error = f"Failed to load library: {exc}"
             return False
 
-        self._lib.Clicker_Init.argtypes = [ClickerConfig]
+        self._lib.Clicker_Init.argtypes = [POINTER(ClickerConfig)]
         self._lib.Clicker_Init.restype = c_int
 
-        self._lib.Clicker_SetInputState.argtypes = [ClickerInputState]
+        self._lib.Clicker_SetInputState.argtypes = [POINTER(ClickerInputState)]
         self._lib.Clicker_SetInputState.restype = None
 
         self._lib.Clicker_Start.argtypes = []
@@ -111,7 +112,7 @@ class AutoClickerDLL:
         self._lib.Clicker_IsRunning.argtypes = []
         self._lib.Clicker_IsRunning.restype = c_int
 
-        self._lib.Clicker_UpdateConfig.argtypes = [ClickerConfig]
+        self._lib.Clicker_UpdateConfig.argtypes = [POINTER(ClickerConfig)]
         self._lib.Clicker_UpdateConfig.restype = None
 
         self._lib.Clicker_Destroy.argtypes = []

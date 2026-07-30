@@ -202,7 +202,7 @@ class AutoClickerWindow(ctk.CTk):
         else:
             self._dll_load_message = (
                 f"Native DLL not available: {self._dll_clicker.get_load_error()}. "
-                "Falling back to Python pyautogui clicker."
+                "Falling back to Python pynput-based clicker."
             )
 
         self._mouse_listener = None
@@ -1184,11 +1184,13 @@ class AutoClickerWindow(ctk.CTk):
             self._hold_since = None
 
     def _emit_click(self) -> None:
-        if pyautogui is None:
-            self.console_log.write("pyautogui not available, cannot click", "ERROR")
+        """Perform a mouse click using pynput (Python fallback when DLL is unavailable)."""
+        if pynput_mouse is None:
+            self.console_log.write("pynput mouse not available, cannot click", "ERROR")
             return
         try:
-            pyautogui.click()
+            controller = pynput_mouse.Controller()
+            controller.click(pynput_mouse.Button.left)
         except Exception as exc:
             self.console_log.write(f"Click error: {exc}", "ERROR")
 
