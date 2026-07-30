@@ -460,11 +460,79 @@ class AutoClickerWindow(ctk.CTk):
         )
         self.wait_enabled_checkbox.grid(row=1, column=2, padx=(0, 12), pady=(0, 8))
 
-        # ── 4. CONSOLE LOG SECTION ─────────────────────────────────────
-        self.console_log = ConsoleLog(self.content_canvas)
-        self.console_log.grid(
+        # ── 4. ADVANCED SETTINGS ──────────────────────────────────────
+        self.advanced_frame = ctk.CTkFrame(
+            self.content_canvas, corner_radius=14, fg_color="#2a2640"
+        )
+        self.advanced_frame.grid(
             row=3, column=0, sticky="ew", padx=6, pady=(4, 8)
         )
+        self.advanced_frame.grid_columnconfigure(0, weight=1)
+
+        # Toggle button row
+        adv_toggle_row = ctk.CTkFrame(self.advanced_frame, fg_color="transparent")
+        adv_toggle_row.grid(row=0, column=0, sticky="ew", padx=8, pady=(6, 4))
+        adv_toggle_row.grid_columnconfigure(1, weight=1)
+
+        adv_icon = ctk.CTkLabel(
+            adv_toggle_row, text="🔧", font=("Segoe UI", 16)
+        )
+        adv_icon.grid(row=0, column=0, sticky="w", padx=(6, 4))
+
+        self.advanced_toggle_btn = ctk.CTkButton(
+            adv_toggle_row,
+            text="▶  Advanced Settings",
+            font=("Segoe UI", 14, "bold"),
+            fg_color=PURPLE_DARK,
+            hover_color=PURPLE_PRIMARY,
+            width=200,
+            height=30,
+            corner_radius=8,
+            command=self._toggle_advanced,
+        )
+        self.advanced_toggle_btn.grid(row=0, column=1, sticky="w", padx=(4, 0))
+
+        # Collapsible container for advanced content
+        self.advanced_content = ctk.CTkFrame(
+            self.advanced_frame, fg_color="transparent"
+        )
+        self.advanced_content.grid(row=1, column=0, sticky="ew", padx=4, pady=(0, 4))
+        self.advanced_content.grid_columnconfigure(0, weight=1)
+
+        # Auto-save interval row
+        auto_save_row = ctk.CTkFrame(self.advanced_content, fg_color="#1e1b2e", corner_radius=10)
+        auto_save_row.grid(row=0, column=0, sticky="ew", padx=8, pady=(4, 6))
+        auto_save_row.grid_columnconfigure(1, weight=1)
+
+        ctk.CTkLabel(
+            auto_save_row,
+            text="Auto-Save Interval (sec):",
+            font=("Segoe UI", 12),
+        ).grid(row=0, column=0, sticky="w", padx=12, pady=8)
+
+        self.auto_save_spin = ctk.CTkEntry(
+            auto_save_row, width=140,
+            fg_color="#2a2640", border_color=PURPLE_DARK,
+        )
+        self.auto_save_spin.grid(row=0, column=1, sticky="w", pady=8)
+        self.auto_save_spin.bind("<KeyRelease>", lambda e: self._on_edit())
+
+        ctk.CTkLabel(
+            auto_save_row,
+            text="(10 – 3600 seconds)",
+            font=("Segoe UI", 10),
+            text_color="#9ca3af",
+        ).grid(row=0, column=2, sticky="w", padx=(8, 12), pady=8)
+
+        # Console log inside advanced
+        self.console_log = ConsoleLog(self.advanced_content)
+        self.console_log.grid(
+            row=1, column=0, sticky="ew", padx=6, pady=(4, 8)
+        )
+
+        # Start hidden
+        self._advanced_visible = False
+        self.advanced_content.grid_remove()
 
         # ── 5. BOTTOM: Enable/Disable Toggle + Status + Alerts ────────
         bottom_frame = ctk.CTkFrame(
@@ -513,6 +581,18 @@ class AutoClickerWindow(ctk.CTk):
 
         # ── Hidden start/stop kept for reference but using toggle ──────
         self._update_mode_visibility()
+
+    # ── Advanced Settings Toggle ──────────────────────────────────────
+
+    def _toggle_advanced(self) -> None:
+        """Show or hide the advanced settings panel."""
+        self._advanced_visible = not self._advanced_visible
+        if self._advanced_visible:
+            self.advanced_content.grid()
+            self.advanced_toggle_btn.configure(text="▼  Advanced Settings")
+        else:
+            self.advanced_content.grid_remove()
+            self.advanced_toggle_btn.configure(text="▶  Advanced Settings")
 
     # ── Input Listeners ───────────────────────────────────────────────
 
@@ -617,6 +697,7 @@ class AutoClickerWindow(ctk.CTk):
             self.wait_enabled_checkbox.select()
         else:
             self.wait_enabled_checkbox.deselect()
+        self._set_value(self.auto_save_spin, self.config.auto_save_interval)
         self._update_mode_visibility()
         self._update_profile_info()
 
@@ -688,6 +769,7 @@ class AutoClickerWindow(ctk.CTk):
             wait_button=self.wait_button_edit.get().strip(),
             wait_enabled=self.wait_enabled_checkbox.get() == 1,
             universal_enabled=False,  # replaced by toggle
+            auto_save_interval=int(self.auto_save_spin.get() or 0),
         )
         return sanitize_config(config)
 

@@ -21,6 +21,7 @@ class AppConfig:
     wait_button: str = ""
     wait_enabled: bool = False
     universal_enabled: bool = False
+    auto_save_interval: int = 60  # seconds, 10-3600 range
 
 
 DEFAULT_CONFIG = AppConfig()
@@ -64,6 +65,8 @@ def validate_settings(config: AppConfig) -> List[str]:
         errors.append("dbl_interval")
     if config.hold_activation not in {"normal", "double-click"}:
         errors.append("hold_activation")
+    if config.auto_save_interval < 10 or config.auto_save_interval > 3600:
+        errors.append("auto_save_interval")
     return errors
 
 
@@ -80,9 +83,12 @@ def sanitize_config(config: AppConfig) -> AppConfig:
         wait_button=(config.wait_button or "").strip(),
         wait_enabled=_coerce_bool(config.wait_enabled),
         universal_enabled=_coerce_bool(config.universal_enabled),
+        auto_save_interval=_coerce_int(config.auto_save_interval, 60, 10),
     )
     if safe.mode == "hold" and safe.hold_activation == "double-click":
         safe.wait_enabled = False
+    # Clamp auto_save_interval to valid range
+    safe.auto_save_interval = max(10, min(3600, safe.auto_save_interval))
     return safe
 
 
@@ -109,6 +115,7 @@ def load_config(profile_path: Path | str) -> AppConfig:
         wait_button=settings.get("wait_button", ""),
         wait_enabled=_coerce_bool(settings.get("wait_enabled", False)),
         universal_enabled=_coerce_bool(settings.get("universal_enabled", False)),
+        auto_save_interval=int(settings.get("auto_save_interval", DEFAULT_CONFIG.auto_save_interval)),
     )
     return sanitize_config(config)
 
@@ -134,6 +141,7 @@ def save_config(profile_path: Path | str, config: AppConfig) -> None:
             "wait_button": safe_config.wait_button,
             "wait_enabled": "1" if safe_config.wait_enabled else "0",
             "universal_enabled": "1" if safe_config.universal_enabled else "0",
+            "auto_save_interval": str(safe_config.auto_save_interval),
         }
     }
     with path.open("w", encoding="utf-8") as handle:

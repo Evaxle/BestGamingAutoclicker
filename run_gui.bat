@@ -4,8 +4,7 @@ cd /d "%~dp0"
 
 echo.
 echo ============================================
-echo    Best Gaming AutoClicker - Purple Edition
-echo    Profile-based autoclicking toolkit
+echo    Best Gaming AutoClicker
 echo ============================================
 echo.
 

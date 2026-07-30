@@ -1,26 +1,25 @@
-# ✅ Task List - Autoclicker Fix, Console Log & Safety
+# ✅ Task List - Advanced Settings, Auto-Save Interval & Profile Loading Fix
 
-## Phase 1: Backend & Config Updates (Done)
-- [x] Update `autoclicker_config.py` - Add backup utilities, improved validation
+## Phase 1: Config Layer Updates
+- [ ] Add `auto_save_interval` field to `AppConfig` dataclass (default: 60 seconds)
+- [ ] Add validation for `auto_save_interval` (range: 10-3600)
+- [ ] Add coercion/sanitization for `auto_save_interval`
+- [ ] Update `save_config()` to persist `auto_save_interval`
+- [ ] Update `load_config()` to read `auto_save_interval`
 
-## Phase 2: GUI Restructure (Done from previous)
-- [x] Purple color scheme, restructured layout, profile management
-- [x] Unsaved changes tracking, auto-disable on edit/switch
-- [x] Large Enable/Disable toggle, status bar
+## Phase 2: GUI - Advanced Settings Toggle
+- [ ] Create "Advanced Settings" toggle button in settings section
+- [ ] Create collapsible frame for advanced settings (hidden by default)
+- [ ] Move console log widget into advanced settings frame
+- [ ] Add auto-save interval input field in advanced settings
 
-## Phase 3: Console Log & Clicker Fixes
-- [ ] Add `ConsoleLog` class with color-coded text widget
-- [ ] Add "Clear Log" button in GUI
-- [ ] Fix spam mode rate (use trigger_cps, ignore turbo_cps)
-- [ ] Fix hold mode timing (monotonic clock, no drift)
-- [ ] Fix double-click mode edge detection
-- [ ] Convert `_clicking` to `threading.Event` for thread safety
-- [ ] Add mid-cycle safety checks (multiple checks per iteration)
-- [ ] Add runaway protection (auto-stop if stuck)
-- [ ] Hook logging into: profile CRUD, save, start/stop, auto-stop, errors
+## Phase 3: GUI - Wire Up New Field
+- [ ] Update `_apply_config_to_form()` to set auto-save interval field
+- [ ] Update `_collect_config()` to read auto-save interval
+- [ ] Verify profile loading populates ALL fields correctly including new one
 
 ## Phase 4: Verification
-- [ ] Run Python syntax check on gui.py
+- [ ] Run Python syntax check on gui.py and autoclicker_config.py
 - [ ] Run unittest suite to verify config layer
-- [ ] Verify GUI launches without import errors
+- [ ] Verify all form fields populate on profile load
 
