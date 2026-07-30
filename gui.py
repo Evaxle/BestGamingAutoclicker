@@ -51,6 +51,103 @@ PURPLE_ACTIVE = "#9333ea"
 GREEN_ENABLE = "#22c55e"
 RED_DISABLE = "#ef4444"
 
+# ── Log Level Colors for Console ─────────────────────────────────────
+LOG_COLORS = {
+    "INFO": "#9ca3af",      # grey
+    "SUCCESS": "#22c55e",   # green
+    "WARNING": "#fbbf24",   # yellow
+    "ERROR": "#ef4444",     # red
+    "FILE": "#a78bfa",      # purple
+    "CLICKER": "#22d3ee",   # cyan
+}
+
+
+class ConsoleLog:
+    """A color-coded, scrolling console widget for displaying debug info."""
+
+    def __init__(self, parent: tk.Widget) -> None:
+        self._frame = ctk.CTkFrame(parent, corner_radius=10, fg_color="#1a1a2e")
+        self._frame.grid_columnconfigure(0, weight=1)
+        self._frame.grid_rowconfigure(0, weight=1)
+
+        # Header row
+        header = ctk.CTkFrame(self._frame, fg_color="transparent")
+        header.grid(row=0, column=0, sticky="ew", padx=8, pady=(6, 2))
+        header.grid_columnconfigure(0, weight=1)
+
+        ctk.CTkLabel(
+            header,
+            text="📋 Console Log",
+            font=("Segoe UI", 13, "bold"),
+            text_color=PURPLE_LIGHT,
+        ).grid(row=0, column=0, sticky="w")
+
+        clear_btn = ctk.CTkButton(
+            header,
+            text="Clear",
+            width=70,
+            height=24,
+            font=("Segoe UI", 11),
+            fg_color=PURPLE_DARK,
+            hover_color=PURPLE_PRIMARY,
+            command=self._clear,
+        )
+        clear_btn.grid(row=0, column=1, sticky="e", padx=(8, 0))
+
+        # Text widget for log output
+        self._text = tk.Text(
+            self._frame,
+            state="disabled",
+            wrap="word",
+            bg="#12121e",
+            fg="#c0c0c0",
+            insertbackground="white",
+            font=("Consolas", 10),
+            borderwidth=0,
+            relief="flat",
+            height=10,
+            padx=8,
+            pady=6,
+        )
+        self._text.grid(row=1, column=0, sticky="nsew", padx=0, pady=(2, 0))
+
+        # Scrollbar
+        scrollbar = ctk.CTkScrollbar(self._frame, command=self._text.yview)
+        scrollbar.grid(row=1, column=1, sticky="ns", pady=(2, 0))
+        self._text.configure(yscrollcommand=scrollbar.set)
+
+        # Configure color tags
+        for level, color in LOG_COLORS.items():
+            self._text.tag_config(level.lower(), foreground=color)
+
+        self._text.tag_config("bold", font=("Consolas", 10, "bold"))
+
+    def _clear(self) -> None:
+        self._text.configure(state="normal")
+        self._text.delete("1.0", "end")
+        self._text.configure(state="disabled")
+
+    def write(self, message: str, level: str = "INFO") -> None:
+        """Append a timestamped, color-coded message to the console."""
+        from datetime import datetime
+
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        tag = level.lower() if level.lower() in LOG_COLORS else "info"
+        line = f"[{timestamp}] [{level}] {message}\n"
+
+        self._text.configure(state="normal")
+        self._text.insert("end", f"[{timestamp}] ", "info")
+        self._text.insert("end", f"[{level}] ", tag)
+        self._text.insert("end", f"{message}\n", tag)
+        self._text.see("end")  # auto-scroll
+        self._text.configure(state="disabled")
+
+    def grid(self, **kwargs):
+        self._frame.grid(**kwargs)
+
+    def grid_remove(self):
+        self._frame.grid_remove()
+
 
 class AutoClickerWindow(ctk.CTk):
     def __init__(self) -> None:
@@ -80,17 +177,20 @@ class AutoClickerWindow(ctk.CTk):
         # ── Internal state ─────────────────────────────────────────────
         self._mode_value = "spam"
         self._hold_mode_value = "normal"
-        self._clicking = False
+        self._clicking_event = threading.Event()  # replaces _clicking bool
+        self._clicking_event.clear()
         self._left_button_down = False
         self._right_button_down = False
         self._pressed_keys: set[str] = set()
+        self._left_was_down = False  # for edge detection in double-click
         self._hold_since: float | None = None
-        self._double_click_ready = False
+        self._double_click_armed = False
         self._last_click_time = 0.0
         self._click_thread: threading.Thread | None = None
         self._mouse_listener = None
         self._keyboard_listener = None
         self._unsaved_changes = False
+        self._idle_timeout = 60.0  # seconds before auto-stop safety
 
         self._build_ui()
         self._load_profiles()
@@ -360,7 +460,13 @@ class AutoClickerWindow(ctk.CTk):
         )
         self.wait_enabled_checkbox.grid(row=1, column=2, padx=(0, 12), pady=(0, 8))
 
-        # ── 3. BOTTOM: Enable/Disable Toggle + Status + Alerts ────────
+        # ── 4. CONSOLE LOG SECTION ─────────────────────────────────────
+        self.console_log = ConsoleLog(self.content_canvas)
+        self.console_log.grid(
+            row=3, column=0, sticky="ew", padx=6, pady=(4, 8)
+        )
+
+        # ── 5. BOTTOM: Enable/Disable Toggle + Status + Alerts ────────
         bottom_frame = ctk.CTkFrame(
             self.main_frame, corner_radius=14, fg_color="#2a2640"
         )
@@ -424,10 +530,11 @@ class AutoClickerWindow(ctk.CTk):
         self, x: int, y: int, button: object, pressed: bool
     ) -> None:
         if button == pynput_mouse.Button.left:
+            self._left_was_down = self._left_button_down
             self._left_button_down = pressed
             if not pressed:
                 self._hold_since = None
-                self._double_click_ready = False
+                self._double_click_armed = True
         elif button == pynput_mouse.Button.right:
             self._right_button_down = pressed
 
@@ -468,9 +575,10 @@ class AutoClickerWindow(ctk.CTk):
     def _on_profile_select(self, profile_name: str) -> None:
         """Handle profile switching – stop clicker, prompt unsaved, load."""
         # Auto-stop the clicker when switching profiles
-        if self._clicking:
+        if self._clicking_event.is_set():
             self._stop_runtime_internal()
             self._set_status("⏸ Stopped – profile changed")
+            self.console_log.write(f"Auto-stopped clicker due to profile switch", "WARNING")
 
         # If there are unsaved changes, offer to save them
         if self._unsaved_changes:
@@ -486,12 +594,14 @@ class AutoClickerWindow(ctk.CTk):
             if answer:
                 self._save_settings_internal()
         # Reset unsaved flag and load the new profile
+        old_profile = self.current_profile
         self.current_profile = profile_name
         self.config = load_config(profile_path(self.data_dir, profile_name))
         self._unsaved_changes = False
         self._apply_config_to_form()
         self._update_unsaved_indicator()
         self._set_status(f"📂 Loaded profile: {profile_name}")
+        self.console_log.write(f"Switched profile: '{old_profile}' → '{profile_name}'", "FILE")
 
     def _apply_config_to_form(self) -> None:
         self._set_mode_selection(self.config.mode)
@@ -598,13 +708,14 @@ class AutoClickerWindow(ctk.CTk):
         self._load_profiles()
         self._update_unsaved_indicator()
         self._set_status(f"📁 Created profile: {profile}")
+        self.console_log.write(f"Created profile file: {target}", "FILE")
 
     def _delete_profile(self) -> None:
         if not self.current_profile or self.current_profile == "default":
             messagebox.showinfo("Protected", "The default profile cannot be deleted.")
             return
         # Stop if running
-        if self._clicking:
+        if self._clicking_event.is_set():
             self._stop_runtime_internal()
         # Confirm
         if not messagebox.askyesno(
@@ -613,8 +724,10 @@ class AutoClickerWindow(ctk.CTk):
         ):
             return
         path = profile_path(self.data_dir, self.current_profile)
+        deleted_name = self.current_profile
         if path.exists():
             path.unlink()
+            self.console_log.write(f"Deleted profile file: {path}", "FILE")
         self.current_profile = "default"
         self._unsaved_changes = False
         self._load_profiles()
@@ -622,6 +735,7 @@ class AutoClickerWindow(ctk.CTk):
         self._apply_config_to_form()
         self._update_unsaved_indicator()
         self._set_status("🗑 Profile deleted")
+        self.console_log.write(f"Profile '{deleted_name}' deleted, switched to 'default'", "FILE")
 
     # ── Saving ────────────────────────────────────────────────────────
 
@@ -634,19 +748,20 @@ class AutoClickerWindow(ctk.CTk):
         self.config = self._collect_config()
         errors = validate_settings(self.config)
         if errors:
+            self.console_log.write(f"Validation errors: {', '.join(errors)}", "WARNING")
             messagebox.showwarning(
                 "Invalid Settings",
                 f"These values need attention: {', '.join(errors)}",
             )
             return False
-        save_config(
-            profile_path(self.data_dir, self.current_profile), self.config
-        )
+        save_path = profile_path(self.data_dir, self.current_profile)
+        save_config(save_path, self.config)
         self._write_active_profile(self.current_profile)
         self._unsaved_changes = False
         self._update_unsaved_indicator()
         self._update_profile_info()
         self._set_status("💾 Settings saved successfully")
+        self.console_log.write(f"Settings saved to: {save_path}", "FILE")
         return True
 
     def _capture_wait_button(self) -> None:
@@ -669,9 +784,10 @@ class AutoClickerWindow(ctk.CTk):
     def _on_edit(self, callback=None) -> None:
         """Called when the user starts editing any setting."""
         # Auto-stop the clicker when user changes settings
-        if self._clicking:
+        if self._clicking_event.is_set():
             self._stop_runtime_internal()
             self._set_status("⏸ Auto-stopped – settings changed")
+            self.console_log.write("Auto-stopped clicker due to settings change", "WARNING")
 
         # Mark unsaved
         if not self._unsaved_changes:
@@ -685,7 +801,7 @@ class AutoClickerWindow(ctk.CTk):
     # ── Runtime Toggle ────────────────────────────────────────────────
 
     def _toggle_runtime(self) -> None:
-        if self._clicking:
+        if self._clicking_event.is_set():
             self._stop_runtime()
         else:
             self._start_runtime()
@@ -706,6 +822,7 @@ class AutoClickerWindow(ctk.CTk):
         self.config = self._collect_config()
         errors = validate_settings(self.config)
         if errors:
+            self.console_log.write(f"Cannot start: validation errors: {', '.join(errors)}", "ERROR")
             messagebox.showwarning(
                 "Invalid Settings",
                 f"These values need attention: {', '.join(errors)}",
@@ -713,9 +830,8 @@ class AutoClickerWindow(ctk.CTk):
             return
 
         # Save current state
-        save_config(
-            profile_path(self.data_dir, self.current_profile), self.config
-        )
+        save_path = profile_path(self.data_dir, self.current_profile)
+        save_config(save_path, self.config)
         self._write_active_profile(self.current_profile)
         save_runtime_state(
             self.data_dir, enabled=True, profile_name=self.current_profile
@@ -727,7 +843,13 @@ class AutoClickerWindow(ctk.CTk):
         self._unsaved_changes = False
         self._update_unsaved_indicator()
         self._update_toggle_ui(enabled=True)
+        mode_str = self._mode_value
+        cps_str = self.config.trigger_cps if mode_str == "spam" else f"hold_delay={self.config.hold_delay}ms"
         self._set_status("▶ Running – clicker active")
+        self.console_log.write(
+            f"Clicker STARTED | profile='{self.current_profile}' | mode={mode_str} | {cps_str}",
+            "SUCCESS",
+        )
 
     def _stop_runtime(self) -> None:
         self._stop_runtime_internal()
@@ -737,6 +859,7 @@ class AutoClickerWindow(ctk.CTk):
         self.runtime_state = load_runtime_state(self.data_dir)
         self._update_toggle_ui(enabled=False)
         self._set_status("■ Stopped – clicker disabled")
+        self.console_log.write("Clicker STOPPED", "CLICKER")
 
     def _stop_runtime_internal(self) -> None:
         """Stop clicker without updating UI state (used internally)."""
@@ -764,15 +887,17 @@ class AutoClickerWindow(ctk.CTk):
 
     def _start_python_clicker(self) -> None:
         if self._click_thread and self._click_thread.is_alive():
+            self.console_log.write("Clicker thread already running, ignoring start", "WARNING")
             return
-        self._clicking = True
+        self._clicking_event.set()
         self._click_thread = threading.Thread(
             target=self._python_click_loop, daemon=True
         )
         self._click_thread.start()
 
     def _stop_python_clicker(self) -> None:
-        self._clicking = False
+        self._clicking_event.clear()
+        # Do not join — thread is daemon, will exit on next loop check
 
     def _wait_requirements_met(self) -> bool:
         if not self.config.wait_enabled or not self.config.wait_button:
@@ -785,61 +910,124 @@ class AutoClickerWindow(ctk.CTk):
         return button_name in self._pressed_keys
 
     def _python_click_loop(self) -> None:
-        """Main autoclicker loop – fixed hold & double-click logic."""
-        while self._clicking:
-            time.sleep(0.005)  # ~5ms polling for responsiveness
+        """Main autoclicker loop – fixed logic with safety checks."""
+        last_activity_time = time.monotonic()
+        click_count = 0
 
-            if not self._clicking:
+        while self._clicking_event.is_set():
+            # ── Safety: idle timeout check ─────────────────────────────
+            # If no LMB activity for `_idle_timeout` seconds, auto-stop
+            if self._left_button_down:
+                last_activity_time = time.monotonic()
+            elif (time.monotonic() - last_activity_time) > self._idle_timeout:
+                self.console_log.write(
+                    f"SAFETY: No input for {self._idle_timeout}s — auto-stopping clicker",
+                    "WARNING",
+                )
+                # Schedule stop on main thread
+                self.after(0, self._stop_runtime)
                 break
 
+            # ── Safety: re-check clicking_event after every operation ──
             if self._mode_value == "hold":
                 if self.config.hold_activation == "double-click":
                     self._handle_double_click_mode()
                 else:
                     self._handle_normal_hold_mode()
+                # Small sleep to prevent CPU spin
+                time.sleep(0.002)
                 continue
 
-            # Spam mode
+            # ── Spam mode ──────────────────────────────────────────────
+            # Only click when left button is held and wait requirements met
             if self._left_button_down and self._wait_requirements_met():
                 self._emit_click()
-                # Use turbo_cps if higher, otherwise trigger_cps
-                cps = max(self.config.trigger_cps, self.config.turbo_cps)
-                time.sleep(max(0.001, 1.0 / max(1, cps)))
+                click_count += 1
+                # Use trigger_cps as the base spam rate
+                delay = 1.0 / max(1, self.config.trigger_cps)
+                # Break the delay into micro-sleeps for responsive stopping
+                self._sleeper_with_checks(delay)
+            else:
+                # No button held — small sleep to avoid busy-wait
+                time.sleep(0.005)
+
+        # Loop exited
+        self.console_log.write(
+            f"Clicker loop ended (total clicks this session: ~{click_count})",
+            "CLICKER",
+        )
+
+    def _sleeper_with_checks(self, total_seconds: float) -> None:
+        """Sleep for `total_seconds` but check `_clicking_event` and button
+        state multiple times to enable responsive stopping and safety."""
+        chunk = 0.01  # 10ms chunks for responsive checks
+        elapsed = 0.0
+        while elapsed < total_seconds:
+            if not self._clicking_event.is_set():
+                return  # Stop signal received
+            # In spam mode, also check if we should stop clicking (button released)
+            if self._mode_value == "spam" and not self._left_button_down:
+                return
+            remaining = total_seconds - elapsed
+            sleep_time = min(chunk, remaining)
+            time.sleep(sleep_time)
+            elapsed += sleep_time
 
     def _handle_double_click_mode(self) -> None:
-        """Double-click hold mode – emit two quick clicks on press."""
-        if self._left_button_down:
-            if self._double_click_ready:
-                self._double_click_ready = False
+        """Double-click hold mode – detect edge-triggered press and fire two clicks."""
+        # Detect rising edge: button was NOT down, but IS now down
+        if self._left_button_down and not self._left_was_down:
+            # Fresh press detected — fire double-click
+            self.console_log.write("Double-click triggered on press", "CLICKER")
+            self._emit_click()
+            self._double_click_armed = False
+            # Sleep for dbl_interval between clicks, with safety checks
+            delay = self.config.dbl_interval / 1000.0
+            self._sleeper_with_checks(delay)
+            if self._clicking_event.is_set() and self._left_button_down:
                 self._emit_click()
-                time.sleep(max(0.001, self.config.dbl_interval / 1000.0))
-                if self._left_button_down:
-                    self._emit_click()
-                # Wait for release before re-arming
-            elif not self._pressed_keys:  # only arm when no keys pressed
-                self._double_click_ready = True
-        else:
-            self._double_click_ready = False
+                self.console_log.write("Second click fired (double-click)", "CLICKER")
+        # Update edge tracking
+        self._left_was_down = self._left_button_down
 
     def _handle_normal_hold_mode(self) -> None:
-        """Normal hold mode – repeatedly click at hold_delay interval."""
+        """Normal hold mode – repeatedly click at hold_delay interval
+        with accurate monotonic timing and mid-cycle safety checks."""
         if self._left_button_down and self._wait_requirements_met():
             if self._hold_since is None:
                 self._hold_since = time.monotonic()
+                return  # wait until first interval elapses
+
             elapsed_ms = (time.monotonic() - self._hold_since) * 1000
             if elapsed_ms >= self.config.hold_delay:
+                # Multiple safety checks before firing
+                if not self._clicking_event.is_set():
+                    self._hold_since = None
+                    return
+                if not self._left_button_down:
+                    self._hold_since = None
+                    return
+
                 self._emit_click()
-                self._hold_since = time.monotonic()
+                # Reset timer relative to last fire time (not absolute)
+                # This prevents drift: offset timer by exactly hold_delay
+                self._hold_since += self.config.hold_delay / 1000.0
+
+                # Prevent timer falling behind if hold_delay was very short
+                now = time.monotonic()
+                if self._hold_since < now - 0.5:
+                    self._hold_since = now
         else:
             self._hold_since = None
 
     def _emit_click(self) -> None:
         if pyautogui is None:
+            self.console_log.write("pyautogui not available, cannot click", "ERROR")
             return
         try:
             pyautogui.click()
-        except Exception:
-            pass
+        except Exception as exc:
+            self.console_log.write(f"Click error: {exc}", "ERROR")
 
     # ── Visibility Helpers ────────────────────────────────────────────
 
