@@ -1,5 +1,6 @@
 #pragma once
 #include <windows.h>
+#include <string>
 
 enum class ClickMode { Spam = 0, Hold = 1 };
 enum class HoldSubMode { Immediate = 0, DoubleClick = 1, WaitForKey = 2 };
@@ -12,6 +13,8 @@ enum class RunState {
 };
 
 struct ClickerSettings {
+    std::string profileName = "Default";
+
     ClickMode mode = ClickMode::Spam;
     double spamAutoClickCPS = 10.0;
     double spamTriggerCPS = 5.0;
@@ -35,6 +38,10 @@ struct ClickerSettings {
 #else
 #define AC_API
 #endif
+
+// Module handle of ac_engine.dll itself. Set in DllMain at load time so the
+// low-level hook calls use the DLL's own module (the hook procs live there).
+extern HMODULE g_acEngineModule;
 
 extern "C" {
 AC_API BOOL AC_Init(HWND hMainWnd);

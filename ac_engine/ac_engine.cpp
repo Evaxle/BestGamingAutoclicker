@@ -7,6 +7,9 @@
 #include <algorithm>
 #include <cmath>
 
+// Defined in dllmain.cpp. Used so low-level hooks use this DLL's module handle.
+extern HMODULE g_acEngineModule;
+
 static const ULONG_PTR INJECTED_SIGNATURE = 0xACAC1234;
 
 struct EngineState {
@@ -95,9 +98,12 @@ static LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lP
 }
 
 static bool IsRealMouseCurrentlyDown() {
-    if (!g.realMouseDown.load()) return false;
-    SHORT s = GetAsyncKeyState(VK_LBUTTON);
-    return (s & 0x8000) != 0;
+    // Trust the low-level hook's tracked state. The hook ignores our synthetic
+    // clicks (they carry INJECTED_SIGNATURE), so g.realMouseDown is only
+    // updated by genuine user input. GetAsyncKeyState alone is unreliable here
+    // because our own SendInput bursts can make it transiently report "up"
+    // even while the user is physically holding the button down.
+    return g.realMouseDown.load();
 }
 
 static void SendSyntheticClick() {
@@ -113,7 +119,7 @@ static void SendSyntheticClick() {
 
 static DWORD WINAPI HookThreadProc(LPVOID) {
     g.hookThreadId = GetCurrentThreadId();
-    HINSTANCE hInst = GetModuleHandle(nullptr);
+    HINSTANCE hInst = g_acEngineModule ? g_acEngineModule : GetModuleHandle(nullptr);
     g.mouseHook = SetWindowsHookExA(WH_MOUSE_LL, LowLevelMouseProc, hInst, 0);
     g.keyboardHook = SetWindowsHookExA(WH_KEYBOARD_LL, LowLevelKeyboardProc, hInst, 0);
     SetEvent(g.hookThreadReadyEvent);
@@ -164,6 +170,12 @@ static bool SampleAndCheckReleased(ReleaseSampleHistory& history, bool doingHold
     if (doingHold) {
         stillActive = IsRealMouseCurrentlyDown();
     } else {
+        // Spam mode: the user is still considered active if they have produced
+        // a real (non-synthetic) click within the last trigger-sample window.
+        // Using a single, consistent window (the same one used to *start*)
+        // avoids start/stop flapping near the threshold CPS. The CPS rate check
+        // still applies so holding the button without clicking does NOT keep it
+        // running (matching the "trigger" concept).
         double cps = ComputeRecentCPS(s.triggerSampleWindowMs);
         stillActive = s.spamTriggerCPS > 0.0 && cps >= s.spamTriggerCPS;
     }

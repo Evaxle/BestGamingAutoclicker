@@ -4,6 +4,7 @@
 #include <commctrl.h>
 #include <shlobj.h>
 #include <string>
+#include <cstring>
 #include <vector>
 #include <map>
 #include <fstream>
@@ -13,7 +14,7 @@
 #include <algorithm>
 #include <cmath>
 
-#include "ac_engine.h"
+#include "ac_engine/ac_engine.h"
 
 // Runtime bindings to ac_engine.dll exports (loaded via LoadLibrary at startup).
 typedef BOOL (*AC_InitFn)(HWND);
@@ -662,10 +663,20 @@ static void RefreshModeVisibility() {
 }
 
 static void RelayoutWindow(HWND hwnd) {
-    RECT rc;
-    GetWindowRect(hwnd, &rc);
     int targetHeight = g_advancedExpanded ? WIN_HEIGHT_EXPANDED : WIN_HEIGHT_COLLAPSED;
-    SetWindowPos(hwnd, nullptr, 0, 0, WIN_WIDTH, targetHeight, SWP_NOMOVE | SWP_NOZORDER);
+
+    // Compute the outer window size that yields a client area of exactly
+    // WIN_WIDTH x targetHeight. This keeps the status bar and Enable button
+    // fully visible (previously the window was sized to the *outer* height,
+    // which clipped the bottom controls because the title bar/borders eat into
+    // the client area).
+    RECT target = {0, 0, WIN_WIDTH, targetHeight};
+    DWORD style = (DWORD)GetWindowLongPtrA(hwnd, GWL_STYLE);
+    DWORD exStyle = (DWORD)GetWindowLongPtrA(hwnd, GWL_EXSTYLE);
+    AdjustWindowRectEx(&target, style, FALSE, exStyle);
+    int outerW = target.right - target.left;
+    int outerH = target.bottom - target.top;
+    SetWindowPos(hwnd, nullptr, 0, 0, outerW, outerH, SWP_NOMOVE | SWP_NOZORDER);
 
     int leftMargin = 12;
     int fullWidth = WIN_WIDTH - 2 * leftMargin - 6;
@@ -1022,6 +1033,18 @@ static FARPROC GetProcAddressFlex(HMODULE h, const char* name) {
     return p;
 }
 
+// Typed helper: resolves an exported function and casts it without the
+// -Wcast-function-type warning (FARPROC is a pointer-to-function with no
+// signature, so a C-style cast between them triggers the warning).
+template <typename Fn>
+static bool ResolveProc(HMODULE h, const char* name, Fn& out) {
+    FARPROC p = GetProcAddressFlex(h, name);
+    if (!p) return false;
+    static_assert(sizeof(Fn) == sizeof(p), "unexpected function pointer size");
+    memcpy(&out, &p, sizeof(p));
+    return true;
+}
+
 static void UnloadEngineDll();
 
 static bool LoadEngineDll() {
@@ -1032,17 +1055,16 @@ static bool LoadEngineDll() {
     }
     if (!g_app.hEngine) return false;
 
-    g_app.AC_Init = (AC_InitFn)GetProcAddressFlex(g_app.hEngine, "AC_Init");
-    g_app.AC_Shutdown = (AC_ShutdownFn)GetProcAddressFlex(g_app.hEngine, "AC_Shutdown");
-    g_app.AC_SetSettings = (AC_SetSettingsFn)GetProcAddressFlex(g_app.hEngine, "AC_SetSettings");
-    g_app.AC_Enable = (AC_EnableFn)GetProcAddressFlex(g_app.hEngine, "AC_Enable");
-    g_app.AC_Disable = (AC_DisableFn)GetProcAddressFlex(g_app.hEngine, "AC_Disable");
-    g_app.AC_IsEnabled = (AC_IsEnabledFn)GetProcAddressFlex(g_app.hEngine, "AC_IsEnabled");
-    g_app.AC_GetRunState = (AC_GetRunStateFn)GetProcAddressFlex(g_app.hEngine, "AC_GetRunState");
+    bool ok = true;
+    ok &= ResolveProc(g_app.hEngine, "AC_Init", g_app.AC_Init);
+    ok &= ResolveProc(g_app.hEngine, "AC_Shutdown", g_app.AC_Shutdown);
+    ok &= ResolveProc(g_app.hEngine, "AC_SetSettings", g_app.AC_SetSettings);
+    ok &= ResolveProc(g_app.hEngine, "AC_Enable", g_app.AC_Enable);
+    ok &= ResolveProc(g_app.hEngine, "AC_Disable", g_app.AC_Disable);
+    ok &= ResolveProc(g_app.hEngine, "AC_IsEnabled", g_app.AC_IsEnabled);
+    ok &= ResolveProc(g_app.hEngine, "AC_GetRunState", g_app.AC_GetRunState);
 
-    if (!g_app.AC_Init || !g_app.AC_Shutdown || !g_app.AC_SetSettings ||
-        !g_app.AC_Enable || !g_app.AC_Disable || !g_app.AC_IsEnabled ||
-        !g_app.AC_GetRunState) {
+    if (!ok) {
         UnloadEngineDll();
         return false;
     }
@@ -1315,15 +1337,17 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     }
 
     RECT desiredRect = {0, 0, WIN_WIDTH, WIN_HEIGHT_COLLAPSED};
-    AdjustWindowRect(&desiredRect, WS_OVERLAPPEDWINDOW & ~WS_MAXIMIZEBOX & ~WS_THICKFRAME, FALSE);
+    DWORD winStyle = (WS_OVERLAPPEDWINDOW & ~WS_MAXIMIZEBOX & ~WS_THICKFRAME) | WS_CLIPCHILDREN;
+    DWORD winExStyle = 0;
+    AdjustWindowRectEx(&desiredRect, winStyle, FALSE, winExStyle);
     int actualWidth = desiredRect.right - desiredRect.left;
     int actualHeight = desiredRect.bottom - desiredRect.top;
 
     HWND hwnd = CreateWindowExA(
-        0,
+        winExStyle,
         WND_CLASS_NAME,
         "AutoClicker",
-        (WS_OVERLAPPEDWINDOW & ~WS_MAXIMIZEBOX & ~WS_THICKFRAME) | WS_CLIPCHILDREN,
+        winStyle,
         CW_USEDEFAULT, CW_USEDEFAULT,
         actualWidth, actualHeight,
         nullptr, nullptr, hInstance, nullptr

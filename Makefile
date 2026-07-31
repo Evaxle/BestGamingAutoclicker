@@ -7,8 +7,11 @@
 #   make            -> builds bin/AutoClicker.exe and bin/ac_engine.dll
 #   make clean      -> removes the bin/ output folder
 
-CXX ?= x86_64-w64-mingw32-g++
-CXXFLAGS ?= -O2 -Wall -std=c++17 -I.
+# The built-in Make variables (CXX, CXXFLAGS) are already defined, so we use
+# "=" (not "?=") so this project's defaults take effect. Use "make CXX=g++"
+# to override, e.g. when building natively on Windows with MinGW.
+CXX = x86_64-w64-mingw32-g++
+CXXFLAGS = -O2 -Wall -std=c++17 -I.
 MKDIR_P := mkdir -p
 
 BIN_DIR := bin

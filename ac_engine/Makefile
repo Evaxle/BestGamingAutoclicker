@@ -5,8 +5,11 @@
 #
 # On Linux override with:  make CXX=x86_64-w64-mingw32-g++
 
-CXX ?= x86_64-w64-mingw32-g++
-CXXFLAGS ?= -O2 -Wall -std=c++17 -I.. -DAC_BUILD_DLL
+# The built-in Make variables (CXX, CXXFLAGS) are already defined, so we use
+# "=" (not "?=") so this project's defaults take effect. Use "make CXX=g++"
+# to override, e.g. when building natively on Windows with MinGW.
+CXX = x86_64-w64-mingw32-g++
+CXXFLAGS = -O2 -Wall -std=c++17 -I.. -DAC_BUILD_DLL
 
 TARGET = ac_engine.dll
 SRCS = ac_engine.cpp dllmain.cpp
