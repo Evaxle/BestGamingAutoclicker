@@ -685,6 +685,8 @@ static void RelayoutWindow(HWND hwnd) {
     SetWindowPos(g_ui.btnEnable, nullptr, leftMargin, bottomY + 28, fullWidth, 36, SWP_NOZORDER);
 }
 
+static void SyncModeRadiosAndVisibility();
+
 static void PushSettingsToUi() {
     g_suppressChangeEvents = true;
     ClickerSettings s;
@@ -716,7 +718,7 @@ static void PushSettingsToUi() {
     SetEditInt(g_ui.editTickMs, s.clickerThreadTickMs);
     SetEditInt(g_ui.editMinInterval, s.minClickIntervalMs);
 
-    RefreshModeVisibility();
+    SyncModeRadiosAndVisibility();
     g_suppressChangeEvents = false;
 }
 
@@ -755,6 +757,25 @@ static void PullUiToSettings() {
     if (s.triggerSampleWindowMs < 1) s.triggerSampleWindowMs = 1;
     if (s.clickerThreadTickMs < 1) s.clickerThreadTickMs = 1;
     if (s.minClickIntervalMs < 1) s.minClickIntervalMs = 1;
+}
+
+// Force the radio-button check states to match g_app.settings, then refresh
+// control visibility. This guarantees the Spam/Hold and the hold sub-mode
+// radio buttons always agree with the current settings (and that the
+// submode-specific fields - Double Click interval / Trigger key - correctly
+// appear/disappear when switching submodes).
+static void SyncModeRadiosAndVisibility() {
+    ClickerSettings s;
+    {
+        std::lock_guard<std::mutex> lock(g_app.settingsMutex);
+        s = g_app.settings;
+    }
+    SendMessage(g_ui.radioSpam, BM_SETCHECK, s.mode == ClickMode::Spam ? BST_CHECKED : BST_UNCHECKED, 0);
+    SendMessage(g_ui.radioHold, BM_SETCHECK, s.mode == ClickMode::Hold ? BST_CHECKED : BST_UNCHECKED, 0);
+    SendMessage(g_ui.radioHoldImmediate, BM_SETCHECK, s.holdSubMode == HoldSubMode::Immediate ? BST_CHECKED : BST_UNCHECKED, 0);
+    SendMessage(g_ui.radioHoldDoubleClick, BM_SETCHECK, s.holdSubMode == HoldSubMode::DoubleClick ? BST_CHECKED : BST_UNCHECKED, 0);
+    SendMessage(g_ui.radioHoldWaitKey, BM_SETCHECK, s.holdSubMode == HoldSubMode::WaitForKey ? BST_CHECKED : BST_UNCHECKED, 0);
+    RefreshModeVisibility();
 }
 
 static void RefreshProfileCombo(const std::string& selectName) {
@@ -815,11 +836,59 @@ static bool DoSaveCurrentProfile() {
     return ok;
 }
 
+// "New Profile" prompt data + window subclass.
+// A standard BUTTON sends BN_CLICKED to its parent via SendMessage - it never
+// appears in the message queue. The old code only inspected the queue for
+// WM_COMMAND/IDOK, so clicking OK (or pressing Enter) was silently swallowed.
+// Fix: subclass the dialog window so WM_COMMAND is handled inside the window
+// proc, where the button notification actually arrives.
+struct PromptDlgData {
+    WNDPROC oldProc = nullptr;
+    HWND hEdit = nullptr;
+    bool done = false;
+    bool accepted = false;
+    char nameBuf[256] = "";
+};
+
+static LRESULT CALLBACK PromptDlgProc(HWND hDlg, UINT msg, WPARAM wParam, LPARAM lParam) {
+    PromptDlgData* d = (PromptDlgData*)GetWindowLongPtrA(hDlg, GWLP_USERDATA);
+    if (!d) return DefWindowProcA(hDlg, msg, wParam, lParam);
+
+    switch (msg) {
+        case WM_COMMAND: {
+            int id = LOWORD(wParam);
+            if (id == IDOK) {
+                GetWindowTextA(d->hEdit, d->nameBuf, sizeof(d->nameBuf));
+                d->accepted = true;
+                d->done = true;
+                DestroyWindow(hDlg);
+                return 0;
+            }
+            if (id == IDCANCEL) {
+                d->done = true;
+                DestroyWindow(hDlg);
+                return 0;
+            }
+            break;
+        }
+        case WM_CLOSE: {
+            d->done = true;
+            DestroyWindow(hDlg);
+            return 0;
+        }
+        case WM_NCDESTROY: {
+            SetWindowLongPtrA(hDlg, GWLP_WNDPROC, (LONG_PTR)d->oldProc);
+            break;
+        }
+    }
+    if (d->oldProc) return CallWindowProcA(d->oldProc, hDlg, msg, wParam, lParam);
+    return DefWindowProcA(hDlg, msg, wParam, lParam);
+}
+
 static bool PromptForProfileName(HWND parent, std::string& outName) {
     HINSTANCE hInst = GetModuleHandle(nullptr);
 
-    char nameBuf[256] = "";
-    bool accepted = false;
+    PromptDlgData data;
 
     HWND hPrompt = CreateWindowExA(WS_EX_DLGMODALFRAME | WS_EX_TOPMOST, "#32770", "New Profile",
         WS_POPUP | WS_CAPTION | WS_SYSMENU | DS_MODALFRAME,
@@ -843,6 +912,13 @@ static bool PromptForProfileName(HWND parent, std::string& outName) {
     SendMessage(okBtn, WM_SETFONT, (WPARAM)font, TRUE);
     SendMessage(cancelBtn, WM_SETFONT, (WPARAM)font, TRUE);
 
+    data.hEdit = edit;
+    SetWindowLongPtrA(hPrompt, GWLP_USERDATA, (LONG_PTR)&data);
+    data.oldProc = (WNDPROC)SetWindowLongPtrA(hPrompt, GWLP_WNDPROC, (LONG_PTR)PromptDlgProc);
+
+    // Make Enter (VK_RETURN) activate the OK button inside IsDialogMessage.
+    SendMessage(hPrompt, DM_SETDEFID, IDOK, 0);
+
     RECT parentRc, dlgRc;
     GetWindowRect(parent, &parentRc);
     GetWindowRect(hPrompt, &dlgRc);
@@ -856,39 +932,12 @@ static bool PromptForProfileName(HWND parent, std::string& outName) {
     SetFocus(edit);
     EnableWindow(parent, FALSE);
 
-    bool done = false;
     MSG msg;
-    while (!done && GetMessage(&msg, nullptr, 0, 0)) {
-        if (msg.hwnd == hPrompt || IsChild(hPrompt, msg.hwnd)) {
-            if (msg.message == WM_COMMAND) {
-                int id = LOWORD(msg.wParam);
-                if (id == IDOK) {
-                    GetWindowTextA(edit, nameBuf, sizeof(nameBuf));
-                    accepted = true;
-                    done = true;
-                } else if (id == IDCANCEL) {
-                    accepted = false;
-                    done = true;
-                }
-            }
-            if (msg.message == WM_KEYDOWN && msg.wParam == VK_RETURN) {
-                GetWindowTextA(edit, nameBuf, sizeof(nameBuf));
-                accepted = true;
-                done = true;
-            }
-            if (msg.message == WM_KEYDOWN && msg.wParam == VK_ESCAPE) {
-                accepted = false;
-                done = true;
-            }
-            if (msg.message == WM_CLOSE) {
-                accepted = false;
-                done = true;
-            }
-            if (!IsDialogMessage(hPrompt, &msg)) {
-                TranslateMessage(&msg);
-                DispatchMessage(&msg);
-            }
-        } else {
+    while (!data.done && GetMessage(&msg, nullptr, 0, 0)) {
+        // IsDialogMessage handles Tab navigation and translates Enter/Escape
+        // into BN_CLICKED on the default (OK) / IDCANCEL button, which our
+        // PromptDlgProc then receives and acts on.
+        if (!IsDialogMessage(hPrompt, &msg)) {
             TranslateMessage(&msg);
             DispatchMessage(&msg);
         }
@@ -896,11 +945,11 @@ static bool PromptForProfileName(HWND parent, std::string& outName) {
 
     EnableWindow(parent, TRUE);
     SetForegroundWindow(parent);
-    DestroyWindow(hPrompt);
+    if (IsWindow(hPrompt)) DestroyWindow(hPrompt);
     DeleteObject(font);
 
-    outName = TrimCopy(std::string(nameBuf));
-    return accepted && !outName.empty();
+    outName = TrimCopy(std::string(data.nameBuf));
+    return data.accepted && !outName.empty();
 }
 
 static bool g_waitingForKeyCapture = false;
@@ -1151,7 +1200,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 case ID_RADIO_HOLD: {
                     if (notifyCode == BN_CLICKED) {
                         PullUiToSettings();
-                        RefreshModeVisibility();
+                        SyncModeRadiosAndVisibility();
                         RelayoutWindow(hwnd);
                         MarkUnsavedAndDisable(hwnd);
                     }
@@ -1162,7 +1211,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPara
                 case ID_RADIO_HOLD_WAITKEY: {
                     if (notifyCode == BN_CLICKED) {
                         PullUiToSettings();
-                        RefreshModeVisibility();
+                        SyncModeRadiosAndVisibility();
                         MarkUnsavedAndDisable(hwnd);
                     }
                     return 0;

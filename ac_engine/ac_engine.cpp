@@ -98,12 +98,18 @@ static LRESULT CALLBACK LowLevelKeyboardProc(int nCode, WPARAM wParam, LPARAM lP
 }
 
 static bool IsRealMouseCurrentlyDown() {
-    // Trust the low-level hook's tracked state. The hook ignores our synthetic
-    // clicks (they carry INJECTED_SIGNATURE), so g.realMouseDown is only
-    // updated by genuine user input. GetAsyncKeyState alone is unreliable here
-    // because our own SendInput bursts can make it transiently report "up"
-    // even while the user is physically holding the button down.
-    return g.realMouseDown.load();
+    // Prefer the hook-tracked state: it ignores our synthetic clicks (they
+    // carry INJECTED_SIGNATURE), so g.realMouseDown is only updated by genuine
+    // user input and stays "down" while the user physically holds the button,
+    // even during our own SendInput bursts.
+    if (g.realMouseDown.load()) return true;
+    // Fallback: if the low-level hook has not seen the press yet (startup,
+    // or the hook was blocked by system policy/security software), check the
+    // physical button state directly. During active synthetic bursts this is
+    // only reached when the hook already says "up", so it won't be fooled by
+    // our own MOUSEEVENTF_LEFTUP events unless the user truly released.
+    SHORT s = GetAsyncKeyState(VK_LBUTTON);
+    return (s & 0x8000) != 0;
 }
 
 static void SendSyntheticClick() {
@@ -170,14 +176,19 @@ static bool SampleAndCheckReleased(ReleaseSampleHistory& history, bool doingHold
     if (doingHold) {
         stillActive = IsRealMouseCurrentlyDown();
     } else {
-        // Spam mode: the user is still considered active if they have produced
-        // a real (non-synthetic) click within the last trigger-sample window.
-        // Using a single, consistent window (the same one used to *start*)
-        // avoids start/stop flapping near the threshold CPS. The CPS rate check
-        // still applies so holding the button without clicking does NOT keep it
-        // running (matching the "trigger" concept).
-        double cps = ComputeRecentCPS(s.triggerSampleWindowMs);
-        stillActive = s.spamTriggerCPS > 0.0 && cps >= s.spamTriggerCPS;
+        // Spam mode: keep clicking while the user is *recently* active.
+        //
+        // IMPORTANT: once the autoclicker takes over, the user stops clicking,
+        // so the real-click CPS rate drops to ~0. Using the rate here would
+        // stop the clicker ~instantly (that was the old bug). Instead we use
+        // the last real (non-synthetic) click time: the clicker stays active
+        // for `graceMs` after the user's most recent genuine click. While the
+        // user keeps clicking, lastRealMouseDownTick keeps refreshing, so it
+        // stays active continuously. When they fully stop, it clicks out a
+        // short tail (graceMs) and then idles.
+        long long graceMs = (long long)(s.triggerSampleWindowMs > 0 ? s.triggerSampleWindowMs : 400);
+        if (graceMs < 100) graceMs = 100;
+        stillActive = (NowMs() - g.lastRealMouseDownTick.load()) < graceMs;
     }
     long long now = NowMs();
     history.samples.push_back({now, !stillActive});
