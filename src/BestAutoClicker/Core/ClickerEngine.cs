@@ -1,30 +1,32 @@
-using System.Diagnostics;
-using System.Runtime.InteropServices;
 using BestAutoClicker.Models;
 
 namespace BestAutoClicker.Core;
 
 /// <summary>
-/// The auto-clicking engine. Faithful port of the original C++ engine's state
-/// machine, but written for .NET:
+/// The auto-clicking state machine. Faithful port of the original C++ engine:
 ///
-///  - Low-level hooks track the user's REAL mouse/keyboard input (synthetic
-///    clicks carry a signature and are ignored).
 ///  - Spam mode: user must be actively clicking (recent real clicks within a
-///    grace window); once the clicker takes over it keeps clicking while the
+///    grace window). Once the clicker takes over it keeps clicking while the
 ///    user keeps clicking, then clicks out a short tail and stops.
 ///  - Hold mode: user must hold the mouse button (and optionally a key). Stops
 ///    as soon as the button is released — verified N consecutive times over a
 ///    window so a dropped hook message can never leave it clicking forever.
 ///  - Double-click sub-mode: a real double click (two clicks within the
 ///    interval) arms the clicker, which then runs while the button is held.
+///
+/// The state machine runs on a background worker thread via
+/// <see cref="RunSpamLoop"/> / <see cref="RunHoldLoop"/>. The per-tick methods
+/// <see cref="TickSpam"/> / <see cref="TickHold"/> are internal so tests can
+/// drive them deterministically against a fake <see cref="IClickerPlatform"/>.
 /// </summary>
 internal sealed class ClickerEngine : IDisposable
 {
-    private readonly HookManager _hooks = new();
-    private readonly Stopwatch _sw = Stopwatch.StartNew();
+    private readonly IClickerPlatform _platform;
     private readonly object _settingsLock = new();
-    private readonly object _timestampsLock = new();
+    private readonly object _spamHistoryLock = new();
+    private readonly object _holdHistoryLock = new();
+    private readonly List<(long time, bool released)> _spamReleaseHistory = new();
+    private readonly List<(long time, bool released)> _holdReleaseHistory = new();
 
     private ClickerSettings _settings = new();
 
@@ -32,33 +34,38 @@ internal sealed class ClickerEngine : IDisposable
     private volatile bool _requestExit;
     private volatile RunState _runState = RunState.Idle;
     private long _stateEnteredTickMs;
-
-    private volatile bool _realMouseDown;
     private long _lastRealMouseDownTick;
-    private long _lastRealMouseUpTick;
-    private readonly List<long> _realClickTimestampsMs = new();
-
-    private readonly object _spamHistoryLock = new();
-    private readonly List<(long time, bool released)> _spamReleaseHistory = new();
-    private readonly object _holdHistoryLock = new();
-    private readonly List<(long time, bool released)> _holdReleaseHistory = new();
+    private long _lastClickTime;
+    private bool _prevMouseDown;
+    private long _firstClickDownTime;
+    private bool _waitingSecondArmed;
 
     private Thread? _worker;
 
     public event Action<RunState, bool>? StateChanged;
     public event Action<uint>? KeyCaptured;
 
-    private long NowMs() => _sw.ElapsedMilliseconds;
+    private long NowMs => _platform.NowMs;
 
     public bool IsEnabled => _enabled;
     public RunState CurrentState => _runState;
-    public HookManager Hooks => _hooks;
 
-    public ClickerEngine()
+    /// <summary>Arming/arming-mode trigger key capture flag (delegates to the platform).</summary>
+    public bool CaptureNextKey
     {
-        _hooks.RealMouseDown += OnRealMouseDown;
-        _hooks.RealMouseUp += OnRealMouseUp;
-        _hooks.RealKeyDown += vk => KeyCaptured?.Invoke(vk);
+        get => _platform.CaptureNextKey;
+        set => _platform.CaptureNextKey = value;
+    }
+
+    public ClickerEngine() : this(new WinClickerPlatform())
+    {
+    }
+
+    internal ClickerEngine(IClickerPlatform platform)
+    {
+        _platform = platform;
+        _platform.MouseDown += ts => Volatile.Write(ref _lastRealMouseDownTick, ts);
+        _platform.KeyDown += vk => KeyCaptured?.Invoke(vk);
     }
 
     // ------------------------------------------------------------------
@@ -68,9 +75,8 @@ internal sealed class ClickerEngine : IDisposable
     public void Start()
     {
         if (_worker != null) return;
-        Win32.timeBeginPeriod(1); // 1ms timer resolution for precise click timing
         _requestExit = false;
-        _hooks.Start();
+        _platform.Start();
         _worker = new Thread(WorkerMain) { IsBackground = true, Name = "ClickerEngine" };
         _worker.Start();
     }
@@ -83,8 +89,7 @@ internal sealed class ClickerEngine : IDisposable
         _runState = RunState.Idle;
         try { _worker.Join(1000); } catch { /* ignore */ }
         _worker = null;
-        _hooks.Stop();
-        Win32.timeEndPeriod(1);
+        _platform.Stop();
     }
 
     public void Enable()
@@ -106,71 +111,14 @@ internal sealed class ClickerEngine : IDisposable
         }
     }
 
-    private ClickerSettings Snapshot()
+    internal ClickerSettings CurrentSettings()
     {
         lock (_settingsLock) return _settings.Clone();
     }
 
-    // ------------------------------------------------------------------
-    // Hook callbacks (real user input only)
-    // ------------------------------------------------------------------
-
-    private void OnRealMouseDown(Win32.MSLLHOOKSTRUCT info)
+    private ClickerSettings Snapshot()
     {
-        _realMouseDown = true;
-        Volatile.Write(ref _lastRealMouseDownTick, NowMs());
-        lock (_timestampsLock)
-        {
-            _realClickTimestampsMs.Add(NowMs());
-            long cutoff = NowMs() - 2000;
-            while (_realClickTimestampsMs.Count > 0 && _realClickTimestampsMs[0] < cutoff)
-                _realClickTimestampsMs.RemoveAt(0);
-        }
-    }
-
-    private void OnRealMouseUp(Win32.MSLLHOOKSTRUCT info)
-    {
-        _realMouseDown = false;
-        Volatile.Write(ref _lastRealMouseUpTick, NowMs());
-    }
-
-    private double ComputeRecentCps(int windowMs)
-    {
-        long now = NowMs();
-        long cutoff = now - windowMs;
-        int count = 0;
-        lock (_timestampsLock)
-        {
-            for (int i = _realClickTimestampsMs.Count - 1; i >= 0; i--)
-            {
-                if (_realClickTimestampsMs[i] < cutoff) break;
-                count++;
-            }
-        }
-        if (windowMs <= 0) return 0.0;
-        return count / ((double)windowMs / 1000.0);
-    }
-
-    private bool IsRealMouseCurrentlyDown()
-    {
-        // Prefer hook-tracked state: ignores synthetic clicks, so it stays
-        // "down" while the user physically holds the button even during our own
-        // SendInput bursts.
-        if (_realMouseDown) return true;
-        // Fallback in case the hook is blocked by policy/security software.
-        return (Win32.GetAsyncKeyState((int)Win32.VK_LBUTTON) & 0x8000) != 0;
-    }
-
-    private static void SendSyntheticClick()
-    {
-        var inputs = new Win32.INPUT[2];
-        inputs[0].type = Win32.INPUT_MOUSE;
-        inputs[0].mi.dwFlags = Win32.MOUSEEVENTF_LEFTDOWN;
-        inputs[0].mi.dwExtraInfo = (UIntPtr)Win32.INJECTED_SIGNATURE;
-        inputs[1].type = Win32.INPUT_MOUSE;
-        inputs[1].mi.dwFlags = Win32.MOUSEEVENTF_LEFTUP;
-        inputs[1].mi.dwExtraInfo = (UIntPtr)Win32.INJECTED_SIGNATURE;
-        Win32.SendInput(2, inputs, Marshal.SizeOf<Win32.INPUT>());
+        lock (_settingsLock) return _settings.Clone();
     }
 
     // ------------------------------------------------------------------
@@ -182,7 +130,7 @@ internal sealed class ClickerEngine : IDisposable
         if (_runState != state)
         {
             _runState = state;
-            Volatile.Write(ref _stateEnteredTickMs, NowMs());
+            Volatile.Write(ref _stateEnteredTickMs, NowMs);
         }
         StateChanged?.Invoke(state, _enabled);
     }
@@ -190,27 +138,31 @@ internal sealed class ClickerEngine : IDisposable
     /// <summary>
     /// Samples "is the user still activating the clicker" and, once N
     /// consecutive samples within the window say "released", reports true so
-    /// the caller can idle. This is the anti-runaway safeguard.
+    /// the caller can idle. This is the anti-runaway safeguard: the clicker
+    /// can never keep going once the user lets go.
     /// </summary>
     private bool SampleAndCheckReleased(List<(long time, bool released)> history, object historyLock, bool doingHold, ClickerSettings s)
     {
         bool stillActive;
         if (doingHold)
         {
-            stillActive = IsRealMouseCurrentlyDown();
+            stillActive = _platform.IsMouseDown;
+            // Wait-For-Key mode: the user must keep BOTH the mouse and the key
+            // held — releasing either one counts as "not activating".
+            if (stillActive && s.HoldSubMode == HoldSubMode.WaitForKey && !_platform.IsKeyDown(s.WaitForKeyVk))
+                stillActive = false;
         }
         else
         {
             // Spam: stay active for a grace window after the user's last real
             // click (the user stops clicking once the clicker takes over, so a
-            // CPS-rate check would stop us almost instantly — that was the bug
-            // in the original engine this port fixes).
+            // CPS-rate check would stop us almost instantly).
             long graceMs = s.TriggerSampleWindowMs > 0 ? s.TriggerSampleWindowMs : 400;
             if (graceMs < 100) graceMs = 100;
-            stillActive = (NowMs() - Volatile.Read(ref _lastRealMouseDownTick)) < graceMs;
+            stillActive = (NowMs - Volatile.Read(ref _lastRealMouseDownTick)) < graceMs;
         }
 
-        long now = NowMs();
+        long now = NowMs;
         lock (historyLock)
         {
             history.Add((now, !stillActive));
@@ -234,8 +186,172 @@ internal sealed class ClickerEngine : IDisposable
         lock (historyLock) history.Clear();
     }
 
+    /// <summary>
+    /// Resets per-loop edge-tracking state. Called when (re)entering a mode loop.
+    /// </summary>
+    internal void ResetTickState()
+    {
+        _lastClickTime = 0;
+        _prevMouseDown = false;
+        _firstClickDownTime = 0;
+        _waitingSecondArmed = false;
+        ResetReleaseHistory(_spamReleaseHistory, _spamHistoryLock);
+        ResetReleaseHistory(_holdReleaseHistory, _holdHistoryLock);
+    }
+
+    private void TryClick(double cps, int minIntervalMs)
+    {
+        if (cps <= 0.0) return;
+        long intervalMs = (long)Math.Round(1000.0 / cps, MidpointRounding.AwayFromZero);
+        if (intervalMs < minIntervalMs) intervalMs = minIntervalMs;
+        long now = NowMs;
+        if (now - _lastClickTime >= intervalMs)
+        {
+            _platform.SendClick();
+            _lastClickTime = now;
+        }
+    }
+
     // ------------------------------------------------------------------
-    // Worker / state machines
+    // Per-tick state machine (internal for deterministic tests)
+    // ------------------------------------------------------------------
+
+    internal void TickSpam(ClickerSettings s)
+    {
+        if (!_enabled || _requestExit) return;
+
+        switch (_runState)
+        {
+            case RunState.Idle:
+            {
+                double cps = _platform.RecentCps(s.TriggerSampleWindowMs);
+                if (s.SpamTriggerCps > 0.0 && cps >= s.SpamTriggerCps)
+                {
+                    SetRunState(RunState.ArmedWaitingDelay);
+                }
+                break;
+            }
+            case RunState.ArmedWaitingDelay:
+            {
+                long elapsed = NowMs - Volatile.Read(ref _stateEnteredTickMs);
+                double cps = _platform.RecentCps(s.TriggerSampleWindowMs);
+                if (cps < s.SpamTriggerCps)
+                {
+                    SetRunState(RunState.Idle);
+                }
+                else if (elapsed >= s.SpamDelayMs)
+                {
+                    _lastClickTime = 0;
+                    ResetReleaseHistory(_spamReleaseHistory, _spamHistoryLock);
+                    SetRunState(RunState.Active);
+                }
+                break;
+            }
+            case RunState.Active:
+            {
+                TryClick(s.SpamAutoClickCps, s.MinClickIntervalMs);
+                bool released = SampleAndCheckReleased(_spamReleaseHistory, _spamHistoryLock, false, s);
+                if (released)
+                {
+                    SetRunState(RunState.Idle);
+                }
+                break;
+            }
+        }
+    }
+
+    internal void TickHold(ClickerSettings s)
+    {
+        if (!_enabled || _requestExit) return;
+
+        bool mouseDownNow = _platform.IsMouseDown;
+
+        switch (_runState)
+        {
+            case RunState.Idle:
+            {
+                if (s.HoldSubMode == HoldSubMode.Immediate)
+                {
+                    if (mouseDownNow && !_prevMouseDown)
+                        SetRunState(RunState.ArmedWaitingDelay);
+                }
+                else if (s.HoldSubMode == HoldSubMode.WaitForKey)
+                {
+                    if (mouseDownNow && !_prevMouseDown && _platform.IsKeyDown(s.WaitForKeyVk))
+                        SetRunState(RunState.ArmedWaitingDelay);
+                }
+                else if (s.HoldSubMode == HoldSubMode.DoubleClick)
+                {
+                    if (mouseDownNow && !_prevMouseDown && !_waitingSecondArmed)
+                        _firstClickDownTime = NowMs;
+                    if (!mouseDownNow && _prevMouseDown && _firstClickDownTime != 0 && !_waitingSecondArmed)
+                    {
+                        _waitingSecondArmed = true;
+                        SetRunState(RunState.WaitingSecondClick);
+                    }
+                }
+                break;
+            }
+            case RunState.WaitingSecondClick:
+            {
+                long elapsedSinceFirstDown = NowMs - _firstClickDownTime;
+                if (elapsedSinceFirstDown > s.DoubleClickIntervalMs && !mouseDownNow)
+                {
+                    _waitingSecondArmed = false;
+                    _firstClickDownTime = 0;
+                    SetRunState(RunState.Idle);
+                }
+                else if (mouseDownNow && !_prevMouseDown)
+                {
+                    long secondDownTime = NowMs;
+                    if (secondDownTime - _firstClickDownTime <= s.DoubleClickIntervalMs)
+                    {
+                        _waitingSecondArmed = false;
+                        _firstClickDownTime = 0;
+                        SetRunState(RunState.ArmedWaitingDelay);
+                    }
+                    else
+                    {
+                        _waitingSecondArmed = false;
+                        _firstClickDownTime = 0;
+                        SetRunState(RunState.Idle);
+                    }
+                }
+                break;
+            }
+            case RunState.ArmedWaitingDelay:
+            {
+                long elapsed = NowMs - Volatile.Read(ref _stateEnteredTickMs);
+                bool keyStillOk = (s.HoldSubMode != HoldSubMode.WaitForKey) || _platform.IsKeyDown(s.WaitForKeyVk);
+                if (!mouseDownNow || !keyStillOk)
+                {
+                    SetRunState(RunState.Idle);
+                }
+                else if (elapsed >= s.HoldDelayMs)
+                {
+                    _lastClickTime = 0;
+                    ResetReleaseHistory(_holdReleaseHistory, _holdHistoryLock);
+                    SetRunState(RunState.Active);
+                }
+                break;
+            }
+            case RunState.Active:
+            {
+                TryClick(s.HoldAutoClickCps, s.MinClickIntervalMs);
+                bool released = SampleAndCheckReleased(_holdReleaseHistory, _holdHistoryLock, true, s);
+                if (released)
+                {
+                    SetRunState(RunState.Idle);
+                }
+                break;
+            }
+        }
+
+        _prevMouseDown = mouseDownNow;
+    }
+
+    // ------------------------------------------------------------------
+    // Worker / loops
     // ------------------------------------------------------------------
 
     private void WorkerMain()
@@ -244,194 +360,43 @@ internal sealed class ClickerEngine : IDisposable
         {
             if (!_enabled)
             {
-                Thread.Sleep(15);
+                _platform.Sleep(15);
                 continue;
             }
             SetRunState(RunState.Idle);
             ClickerSettings s = Snapshot();
-            if (s.Mode == ClickMode.Spam) RunSpamModeLoop();
-            else RunHoldModeLoop();
+            if (s.Mode == ClickMode.Spam) RunSpamLoop();
+            else RunHoldLoop();
         }
     }
 
-    private void RunSpamModeLoop()
+    private void RunSpamLoop()
     {
-        long lastClickTime = 0;
+        ResetTickState();
         while (_enabled && !_requestExit)
         {
             ClickerSettings s = Snapshot();
             if (s.Mode != ClickMode.Spam) return;
-
-            switch (_runState)
-            {
-                case RunState.Idle:
-                {
-                    double cps = ComputeRecentCps(s.TriggerSampleWindowMs);
-                    if (s.SpamTriggerCps > 0.0 && cps >= s.SpamTriggerCps)
-                    {
-                        SetRunState(RunState.ArmedWaitingDelay);
-                    }
-                    break;
-                }
-                case RunState.ArmedWaitingDelay:
-                {
-                    long elapsed = NowMs() - Volatile.Read(ref _stateEnteredTickMs);
-                    double cps = ComputeRecentCps(s.TriggerSampleWindowMs);
-                    if (cps < s.SpamTriggerCps)
-                    {
-                        SetRunState(RunState.Idle);
-                    }
-                    else if (elapsed >= s.SpamDelayMs)
-                    {
-                        lastClickTime = 0;
-                        ResetReleaseHistory(_spamReleaseHistory, _spamHistoryLock);
-                        SetRunState(RunState.Active);
-                    }
-                    break;
-                }
-                case RunState.Active:
-                {
-                    TryClick(ref lastClickTime, s.SpamAutoClickCps, s.MinClickIntervalMs);
-                    bool released = SampleAndCheckReleased(_spamReleaseHistory, _spamHistoryLock, false, s);
-                    if (released)
-                    {
-                        SetRunState(RunState.Idle);
-                    }
-                    break;
-                }
-            }
-
-            SleepTick(s.ClickerThreadTickMs);
+            TickSpam(s);
+            _platform.Sleep(s.ClickerThreadTickMs);
         }
     }
 
-    private void RunHoldModeLoop()
+    private void RunHoldLoop()
     {
-        long lastClickTime = 0;
-        bool prevMouseDown = false;
-        long firstClickDownTime = 0;
-        bool waitingSecondArmed = false;
-
+        ResetTickState();
         while (_enabled && !_requestExit)
         {
             ClickerSettings s = Snapshot();
             if (s.Mode != ClickMode.Hold) return;
-
-            bool mouseDownNow = IsRealMouseCurrentlyDown();
-
-            switch (_runState)
-            {
-                case RunState.Idle:
-                {
-                    if (s.HoldSubMode == HoldSubMode.Immediate)
-                    {
-                        if (mouseDownNow && !prevMouseDown)
-                            SetRunState(RunState.ArmedWaitingDelay);
-                    }
-                    else if (s.HoldSubMode == HoldSubMode.WaitForKey)
-                    {
-                        if (mouseDownNow && !prevMouseDown && Win32.IsRealKeyDown(s.WaitForKeyVk))
-                            SetRunState(RunState.ArmedWaitingDelay);
-                    }
-                    else if (s.HoldSubMode == HoldSubMode.DoubleClick)
-                    {
-                        if (mouseDownNow && !prevMouseDown && !waitingSecondArmed)
-                            firstClickDownTime = NowMs();
-                        if (!mouseDownNow && prevMouseDown && firstClickDownTime != 0 && !waitingSecondArmed)
-                        {
-                            waitingSecondArmed = true;
-                            SetRunState(RunState.WaitingSecondClick);
-                        }
-                    }
-                    break;
-                }
-                case RunState.WaitingSecondClick:
-                {
-                    long elapsedSinceFirstDown = NowMs() - firstClickDownTime;
-                    if (elapsedSinceFirstDown > s.DoubleClickIntervalMs && !mouseDownNow)
-                    {
-                        waitingSecondArmed = false;
-                        firstClickDownTime = 0;
-                        SetRunState(RunState.Idle);
-                    }
-                    else if (mouseDownNow && !prevMouseDown)
-                    {
-                        long secondDownTime = NowMs();
-                        if (secondDownTime - firstClickDownTime <= s.DoubleClickIntervalMs)
-                        {
-                            waitingSecondArmed = false;
-                            firstClickDownTime = 0;
-                            SetRunState(RunState.ArmedWaitingDelay);
-                        }
-                        else
-                        {
-                            waitingSecondArmed = false;
-                            firstClickDownTime = 0;
-                            SetRunState(RunState.Idle);
-                        }
-                    }
-                    break;
-                }
-                case RunState.ArmedWaitingDelay:
-                {
-                    long elapsed = NowMs() - Volatile.Read(ref _stateEnteredTickMs);
-                    bool keyStillOk = (s.HoldSubMode != HoldSubMode.WaitForKey) || Win32.IsRealKeyDown(s.WaitForKeyVk);
-                    if (!mouseDownNow || !keyStillOk)
-                    {
-                        SetRunState(RunState.Idle);
-                    }
-                    else if (elapsed >= s.HoldDelayMs)
-                    {
-                        lastClickTime = 0;
-                        ResetReleaseHistory(_holdReleaseHistory, _holdHistoryLock);
-                        SetRunState(RunState.Active);
-                    }
-                    break;
-                }
-                case RunState.Active:
-                {
-                    TryClick(ref lastClickTime, s.HoldAutoClickCps, s.MinClickIntervalMs);
-                    bool released = SampleAndCheckReleased(_holdReleaseHistory, _holdHistoryLock, true, s);
-                    if (released)
-                    {
-                        SetRunState(RunState.Idle);
-                    }
-                    break;
-                }
-            }
-
-            prevMouseDown = mouseDownNow;
-            SleepTick(s.ClickerThreadTickMs);
+            TickHold(s);
+            _platform.Sleep(s.ClickerThreadTickMs);
         }
-    }
-
-    private void TryClick(ref long lastClickTime, double cps, int minIntervalMs)
-    {
-        if (cps <= 0.0) return;
-        long intervalMs = (long)Math.Round(1000.0 / cps, MidpointRounding.AwayFromZero);
-        if (intervalMs < minIntervalMs) intervalMs = minIntervalMs;
-        long now = NowMs();
-        if (now - lastClickTime >= intervalMs)
-        {
-            SendSyntheticClick();
-            lastClickTime = now;
-        }
-    }
-
-    private void SleepTick(int tickMs)
-    {
-        int t = tickMs > 0 ? tickMs : 2;
-        if (t <= 1)
-        {
-            Thread.SpinWait(1);
-            return;
-        }
-        Thread.Sleep(t);
     }
 
     public void Dispose()
     {
         Stop();
-        _hooks.Dispose();
+        _platform.Dispose();
     }
 }

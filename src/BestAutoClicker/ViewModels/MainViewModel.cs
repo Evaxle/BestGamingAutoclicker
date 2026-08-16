@@ -408,7 +408,7 @@ public sealed partial class MainViewModel : ObservableObject
         if (_capturingKey) return;
         _capturingKey = true;
         IsCapturingKey = true;
-        _engine.Hooks.CaptureNextKey = true;
+        _engine.CaptureNextKey = true;
         SetNotice("Press a key…  (Esc to cancel)");
 
         var tcs = new TaskCompletionSource<uint>(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -439,7 +439,7 @@ public sealed partial class MainViewModel : ObservableObject
         finally
         {
             _engine.KeyCaptured -= handler;
-            _engine.Hooks.CaptureNextKey = false;
+            _engine.CaptureNextKey = false;
             _capturingKey = false;
             IsCapturingKey = false;
         }

@@ -134,6 +134,23 @@ internal static class Win32
     public static extern uint timeEndPeriod(uint uPeriod);
 
     // ---- Helpers ----
+    /// <summary>
+    /// Sends one synthetic left-click (down + up) at the current cursor position.
+    /// The events carry <see cref="INJECTED_SIGNATURE"/> in dwExtraInfo so the
+    /// low-level hooks can tell them apart from real user input.
+    /// </summary>
+    public static void SendSyntheticClick()
+    {
+        var inputs = new INPUT[2];
+        inputs[0].type = INPUT_MOUSE;
+        inputs[0].mi.dwFlags = MOUSEEVENTF_LEFTDOWN;
+        inputs[0].mi.dwExtraInfo = (UIntPtr)INJECTED_SIGNATURE;
+        inputs[1].type = INPUT_MOUSE;
+        inputs[1].mi.dwFlags = MOUSEEVENTF_LEFTUP;
+        inputs[1].mi.dwExtraInfo = (UIntPtr)INJECTED_SIGNATURE;
+        SendInput(2, inputs, Marshal.SizeOf<INPUT>());
+    }
+
     public static bool IsRealKeyDown(uint vk)
     {
         if (vk == 0) return true;
