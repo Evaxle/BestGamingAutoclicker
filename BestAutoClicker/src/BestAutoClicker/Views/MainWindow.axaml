@@ -1,0 +1,392 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:BestAutoClicker.ViewModels"
+        x:Class="BestAutoClicker.Views.MainWindow"
+        x:DataType="vm:MainViewModel"
+        Width="640"
+        Height="760"
+        MinWidth="600"
+        MinHeight="680"
+        WindowStartupLocation="CenterScreen"
+        Background="Transparent"
+        WindowDecorations="None"
+        TransparencyLevelHint="Blur"
+        ExtendClientAreaToDecorationsHint="True"
+        Topmost="{Binding IsTopmost}">
+
+  <Border Background="{DynamicResource BackgroundBrush}"
+          BorderBrush="{DynamicResource BorderBrush}"
+          BorderThickness="1"
+          CornerRadius="14"
+          ClipToBounds="True">
+
+    <Grid x:Name="RootPanel">
+      <Grid.RenderTransform>
+        <ScaleTransform />
+      </Grid.RenderTransform>
+
+      <ScrollViewer HorizontalScrollBarVisibility="Disabled"
+                    VerticalScrollBarVisibility="Auto">
+
+        <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto,Auto">
+
+          <!-- ============ Title bar ============ -->
+          <Grid Grid.Row="0" Height="42" Margin="12,6,12,0">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="*" />
+              <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <StackPanel x:Name="DragRegion"
+                        Grid.Column="0"
+                        Orientation="Horizontal"
+                        Spacing="9"
+                        VerticalAlignment="Center"
+                        Cursor="SizeAll"
+                        PointerPressed="DragRegion_OnPointerPressed">
+              <Border Width="13" Height="13" CornerRadius="4" Background="{DynamicResource AccentGradient}" />
+              <TextBlock Text="BEST AUTO CLICKER"
+                         FontSize="12.5"
+                         FontWeight="Bold"
+                         Foreground="{DynamicResource TextPrimaryBrush}"
+                         VerticalAlignment="Center" />
+            </StackPanel>
+
+            <Grid x:Name="DragSpacer" Grid.Column="1" Background="Transparent" Cursor="SizeAll" PointerPressed="DragRegion_OnPointerPressed" />
+
+            <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+              <Button Classes="acBtn iconBtn" Command="{Binding ToggleTopmostCommand}">
+                <TextBlock Text="{Binding TopmostText}" FontSize="10.5" FontWeight="SemiBold" />
+              </Button>
+              <Button Classes="acBtn iconBtn" x:Name="MinimizeButton" Click="MinimizeButton_OnClick">
+                <TextBlock Text="&#x2013;" FontSize="16" />
+              </Button>
+              <Button Classes="acBtn iconBtn close" x:Name="CloseButton" Click="CloseButton_OnClick">
+                <TextBlock Text="&#x2715;" FontSize="13" />
+              </Button>
+            </StackPanel>
+          </Grid>
+
+          <!-- ============ Header ============ -->
+          <Grid Grid.Row="1" Margin="24,10,24,0">
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="*" />
+              <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <StackPanel Grid.Column="0" Spacing="2">
+              <TextBlock Text="AUTO CLICKER"
+                         FontSize="25"
+                         FontWeight="Bold"
+                         Foreground="{DynamicResource TextPrimaryBrush}" />
+              <TextBlock Text="Click automatically while you keep clicking or holding."
+                         FontSize="12.5"
+                         Foreground="{DynamicResource TextSecondaryBrush}" />
+            </StackPanel>
+
+            <Border Grid.Column="1" Classes="chip" Padding="12,7" VerticalAlignment="Center">
+              <StackPanel Orientation="Horizontal" Spacing="8">
+                <Ellipse Width="10" Height="10" Fill="{DynamicResource IdleBrush}"
+                         IsVisible="{Binding IsIdle}" />
+                <Ellipse Width="10" Height="10" Fill="{DynamicResource WarningBrush}"
+                         IsVisible="{Binding IsArmed}" />
+                <Ellipse Width="10" Height="10" Fill="{DynamicResource SuccessBrush}"
+                         Classes="pulseDot"
+                         IsVisible="{Binding IsClicking}">
+                  <Ellipse.RenderTransform>
+                    <ScaleTransform />
+                  </Ellipse.RenderTransform>
+                </Ellipse>
+                <TextBlock Text="{Binding StatusText}"
+                           FontSize="12"
+                           Foreground="{DynamicResource TextSecondaryBrush}" />
+              </StackPanel>
+            </Border>
+          </Grid>
+
+          <!-- ============ Start button ============ -->
+          <Grid Grid.Row="2" Margin="24,16,24,0">
+            <Ellipse Classes="halo"
+                     Fill="{DynamicResource CyanGradient}"
+                     Width="260" Height="140"
+                     HorizontalAlignment="Center"
+                     VerticalAlignment="Center"
+                     IsVisible="{Binding IsRunning}" />
+            <Button Classes="acBtn accent"
+                    Height="56"
+                    CornerRadius="16"
+                    Command="{Binding ToggleRunningCommand}">
+              <StackPanel Orientation="Horizontal" Spacing="12" VerticalAlignment="Center">
+                <TextBlock Text="{Binding StartStopText}"
+                           FontSize="17"
+                           FontWeight="Bold"
+                           Foreground="{DynamicResource WhiteBrush}" />
+                <TextBlock Text="{Binding IsRunningText}"
+                           FontSize="12"
+                           Foreground="#AFFFFFFF"
+                           VerticalAlignment="Center" />
+              </StackPanel>
+            </Button>
+          </Grid>
+
+          <!-- ============ Mode selector ============ -->
+          <StackPanel Grid.Row="3" Margin="24,14,24,0" Spacing="8">
+            <ListBox Classes="segmented"
+                     ItemsSource="{Binding ModeOptions}"
+                     SelectedItem="{Binding SelectedMode}">
+              <ListBox.ItemsPanel>
+                <ItemsPanelTemplate>
+                  <UniformGrid Columns="2" Rows="1" />
+                </ItemsPanelTemplate>
+              </ListBox.ItemsPanel>
+              <ListBox.ItemTemplate>
+                <DataTemplate x:DataType="vm:ModeOption">
+                  <TextBlock Text="{Binding Label}" />
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+            <TextBlock Text="{Binding SelectedMode.Description}"
+                       FontSize="12"
+                       Foreground="{DynamicResource TextFaintBrush}"
+                       TextWrapping="Wrap" />
+          </StackPanel>
+
+          <!-- ============ Settings cards ============ -->
+          <Grid Grid.Row="4" Margin="24,12,24,0">
+
+            <!-- SPAM card -->
+            <Grid Classes="cardIn" x:Name="SpamCard" IsVisible="{Binding IsSpamMode}">
+              <Grid.RenderTransform>
+                <TranslateTransform />
+              </Grid.RenderTransform>
+              <Border Classes="card">
+                <StackPanel Spacing="16">
+                  <TextBlock Classes="sectionTitle" Text="SPAM MODE SETTINGS" />
+                  <TextBlock Text="Click fast in game and the clicker takes over at your CPS, then keeps clicking while you keep clicking."
+                             FontSize="12" Foreground="{DynamicResource TextFaintBrush}" TextWrapping="Wrap" />
+
+                  <StackPanel Spacing="4">
+                    <Grid ColumnDefinitions="*,Auto">
+                      <TextBlock Classes="sectionLabel" Text="Auto-click CPS" VerticalAlignment="Center" />
+                      <TextBlock Grid.Column="1" Classes="valueLabel"
+                                 Text="{Binding SpamAutoCps, StringFormat={}{0:0.#}}" />
+                    </Grid>
+                    <Slider Classes="acSlider" Minimum="0.5" Maximum="60"
+                            Value="{Binding SpamAutoCps}" />
+                  </StackPanel>
+
+                  <StackPanel Spacing="4">
+                    <Grid ColumnDefinitions="*,Auto">
+                      <TextBlock Classes="sectionLabel" Text="Trigger CPS to arm" VerticalAlignment="Center" />
+                      <TextBlock Grid.Column="1" Classes="valueLabel"
+                                 Text="{Binding SpamTriggerCps, StringFormat={}{0:0.#}}" />
+                    </Grid>
+                    <Slider Classes="acSlider" Minimum="0.5" Maximum="30"
+                            Value="{Binding SpamTriggerCps}" />
+                  </StackPanel>
+
+                  <StackPanel Spacing="4">
+                    <Grid ColumnDefinitions="*,Auto">
+                      <TextBlock Classes="sectionLabel" Text="Arm delay (ms)" VerticalAlignment="Center" />
+                      <TextBlock Grid.Column="1" Classes="valueLabel"
+                                 Text="{Binding SpamDelayMs, StringFormat={}{0:0} ms}" />
+                    </Grid>
+                    <Slider Classes="acSlider" Minimum="0" Maximum="1000"
+                            Value="{Binding SpamDelayMs}" />
+                  </StackPanel>
+                </StackPanel>
+              </Border>
+            </Grid>
+
+            <!-- HOLD card -->
+            <Grid Classes="cardIn" x:Name="HoldCard" IsVisible="{Binding IsHoldMode}">
+              <Grid.RenderTransform>
+                <TranslateTransform />
+              </Grid.RenderTransform>
+              <Border Classes="card">
+                <StackPanel Spacing="16">
+                  <TextBlock Classes="sectionTitle" Text="HOLD MODE SETTINGS" />
+                  <TextBlock Text="Hold the mouse button (and optionally a key) in game to click at your chosen speed."
+                             FontSize="12" Foreground="{DynamicResource TextFaintBrush}" TextWrapping="Wrap" />
+
+                  <ListBox Classes="segmented"
+                           ItemsSource="{Binding SubModeOptions}"
+                           SelectedItem="{Binding SelectedSubMode}">
+                    <ListBox.ItemsPanel>
+                      <ItemsPanelTemplate>
+                        <UniformGrid Columns="3" Rows="1" />
+                      </ItemsPanelTemplate>
+                    </ListBox.ItemsPanel>
+                    <ListBox.ItemTemplate>
+                      <DataTemplate x:DataType="vm:SubModeOption">
+                        <TextBlock Text="{Binding Label}" />
+                      </DataTemplate>
+                    </ListBox.ItemTemplate>
+                  </ListBox>
+
+                  <StackPanel Spacing="4">
+                    <Grid ColumnDefinitions="*,Auto">
+                      <TextBlock Classes="sectionLabel" Text="Auto-click CPS" VerticalAlignment="Center" />
+                      <TextBlock Grid.Column="1" Classes="valueLabel"
+                                 Text="{Binding HoldAutoCps, StringFormat={}{0:0.#}}" />
+                    </Grid>
+                    <Slider Classes="acSlider" Minimum="0.5" Maximum="60"
+                            Value="{Binding HoldAutoCps}" />
+                  </StackPanel>
+
+                  <StackPanel Spacing="4">
+                    <Grid ColumnDefinitions="*,Auto">
+                      <TextBlock Classes="sectionLabel" Text="Arm delay (ms)" VerticalAlignment="Center" />
+                      <TextBlock Grid.Column="1" Classes="valueLabel"
+                                 Text="{Binding HoldDelayMs, StringFormat={}{0:0} ms}" />
+                    </Grid>
+                    <Slider Classes="acSlider" Minimum="0" Maximum="1000"
+                            Value="{Binding HoldDelayMs}" />
+                  </StackPanel>
+
+                  <StackPanel Spacing="4" IsVisible="{Binding ShowDoubleClickInterval}">
+                    <Grid ColumnDefinitions="*,Auto">
+                      <TextBlock Classes="sectionLabel" Text="Double-click interval (ms)" VerticalAlignment="Center" />
+                      <TextBlock Grid.Column="1" Classes="valueLabel"
+                                 Text="{Binding DoubleClickIntervalMs, StringFormat={}{0:0} ms}" />
+                    </Grid>
+                    <Slider Classes="acSlider" Minimum="50" Maximum="1000"
+                            Value="{Binding DoubleClickIntervalMs}" />
+                  </StackPanel>
+
+                  <StackPanel Spacing="8" IsVisible="{Binding ShowTriggerKey}">
+                    <TextBlock Classes="sectionLabel" Text="Hold this key + mouse button to activate" />
+                    <Button Classes="acBtn small accent"
+                            Command="{Binding CaptureKeyCommand}"
+                            MinWidth="150"
+                            HorizontalAlignment="Left">
+                      <StackPanel>
+                        <TextBlock Text="Press a key&#x2026;" IsVisible="{Binding IsCapturingKey}" />
+                        <TextBlock Text="{Binding TriggerKeyName}" IsVisible="{Binding IsNotCapturingKey}" />
+                      </StackPanel>
+                    </Button>
+                  </StackPanel>
+                </StackPanel>
+              </Border>
+            </Grid>
+          </Grid>
+
+          <!-- ============ Advanced toggle ============ -->
+          <Button Grid.Row="5"
+                  Classes="acBtn"
+                  Margin="24,14,24,0"
+                  HorizontalAlignment="Stretch"
+                  Command="{Binding ToggleAdvancedCommand}">
+            <TextBlock Text="{Binding AdvancedToggleText}" />
+          </Button>
+
+          <!-- ============ Advanced panel ============ -->
+          <Border Grid.Row="6"
+                  Classes="card"
+                  Margin="24,10,24,0"
+                  IsVisible="False"
+                  x:Name="AdvancedPanel">
+            <Border.RenderTransform>
+              <TranslateTransform />
+            </Border.RenderTransform>
+            <StackPanel Spacing="14">
+              <TextBlock Classes="sectionTitle" Text="ADVANCED · STOP-CHECK" />
+              <TextBlock Text="Safety: the clicker re-checks that you are still holding / clicking several times per window before stopping. It will never keep going once you let go."
+                         FontSize="12" Foreground="{DynamicResource TextFaintBrush}" TextWrapping="Wrap" />
+
+              <WrapPanel>
+                <StackPanel Width="240" Margin="0,0,16,12" Spacing="2">
+                  <TextBlock Classes="sectionLabel" Text="Stop-check count" />
+                  <Grid ColumnDefinitions="*,Auto">
+                    <Slider Classes="acSlider" Minimum="1" Maximum="10"
+                            Value="{Binding StopCheckCount}"
+                            IsSnapToTickEnabled="True" TickFrequency="1" />
+                    <TextBlock Grid.Column="1" Width="34" TextAlignment="Right" Classes="valueLabel"
+                               Text="{Binding StopCheckCount, StringFormat={}{0:0}}" />
+                  </Grid>
+                </StackPanel>
+
+                <StackPanel Width="240" Margin="0,0,0,12" Spacing="2">
+                  <TextBlock Classes="sectionLabel" Text="Stop-check window (ms)" />
+                  <Grid ColumnDefinitions="*,Auto">
+                    <Slider Classes="acSlider" Minimum="10" Maximum="500"
+                            Value="{Binding StopCheckWindowMs}" />
+                    <TextBlock Grid.Column="1" Width="42" TextAlignment="Right" Classes="valueLabel"
+                               Text="{Binding StopCheckWindowMs, StringFormat={}{0:0}}" />
+                  </Grid>
+                </StackPanel>
+
+                <StackPanel Width="240" Margin="0,0,16,12" Spacing="2">
+                  <TextBlock Classes="sectionLabel" Text="Trigger sample window (ms)" />
+                  <Grid ColumnDefinitions="*,Auto">
+                    <Slider Classes="acSlider" Minimum="50" Maximum="2000"
+                            Value="{Binding TriggerSampleWindowMs}" />
+                    <TextBlock Grid.Column="1" Width="42" TextAlignment="Right" Classes="valueLabel"
+                               Text="{Binding TriggerSampleWindowMs, StringFormat={}{0:0}}" />
+                  </Grid>
+                </StackPanel>
+
+                <StackPanel Width="240" Margin="0,0,0,12" Spacing="2">
+                  <TextBlock Classes="sectionLabel" Text="Internal tick (ms)" />
+                  <Grid ColumnDefinitions="*,Auto">
+                    <Slider Classes="acSlider" Minimum="1" Maximum="20"
+                            Value="{Binding TickMs}"
+                            IsSnapToTickEnabled="True" TickFrequency="1" />
+                    <TextBlock Grid.Column="1" Width="34" TextAlignment="Right" Classes="valueLabel"
+                               Text="{Binding TickMs, StringFormat={}{0:0}}" />
+                  </Grid>
+                </StackPanel>
+
+                <StackPanel Width="240" Spacing="2">
+                  <TextBlock Classes="sectionLabel" Text="Min click interval (ms)" />
+                  <Grid ColumnDefinitions="*,Auto">
+                    <Slider Classes="acSlider" Minimum="1" Maximum="50"
+                            Value="{Binding MinIntervalMs}"
+                            IsSnapToTickEnabled="True" TickFrequency="1" />
+                    <TextBlock Grid.Column="1" Width="34" TextAlignment="Right" Classes="valueLabel"
+                               Text="{Binding MinIntervalMs, StringFormat={}{0:0}}" />
+                  </Grid>
+                </StackPanel>
+              </WrapPanel>
+            </StackPanel>
+          </Border>
+
+          <!-- ============ Profile ============ -->
+          <Border Grid.Row="7" Classes="card" Margin="24,14,24,0">
+            <StackPanel Spacing="12">
+              <TextBlock Classes="sectionTitle" Text="PROFILE" />
+              <ComboBox Classes="acComboBox"
+                        ItemsSource="{Binding Profiles}"
+                        SelectedItem="{Binding SelectedProfile}"
+                        HorizontalAlignment="Stretch" />
+              <Grid ColumnDefinitions="*,Auto,Auto,Auto" ColumnSpacing="8">
+                <TextBox Classes="acTextBox"
+                         Text="{Binding CurrentProfileName}"
+                         PlaceholderText="Profile name" />
+                <Button Grid.Column="1" Classes="acBtn" Command="{Binding SaveProfileCommand}">
+                  <TextBlock Text="{Binding ProfileSaveText}" />
+                </Button>
+                <Button Grid.Column="2" Classes="acBtn" Command="{Binding NewProfileCommand}">
+                  <TextBlock Text="New" />
+                </Button>
+                <Button Grid.Column="3" Classes="acBtn danger" Command="{Binding DeleteProfileCommand}">
+                  <TextBlock Text="Delete" />
+                </Button>
+              </Grid>
+            </StackPanel>
+          </Border>
+
+          <!-- ============ Notice ============ -->
+          <Border Grid.Row="8" Margin="24,10,24,16" IsVisible="{Binding HasNotice}">
+            <TextBlock Text="{Binding Notice}"
+                       FontSize="12"
+                       Foreground="{DynamicResource AccentBrush2}"
+                       HorizontalAlignment="Center" />
+          </Border>
+
+        </Grid>
+      </ScrollViewer>
+    </Grid>
+  </Border>
+</Window>

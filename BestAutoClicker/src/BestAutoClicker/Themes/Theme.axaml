@@ -1,0 +1,67 @@
+<ResourceDictionary xmlns="https://github.com/avaloniaui"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+  <!-- ===================== Palette ===================== -->
+  <Color x:Key="BgColor">#0B0F17</Color>
+  <Color x:Key="SurfaceColor">#121826</Color>
+  <Color x:Key="SurfaceAltColor">#1A2233</Color>
+  <Color x:Key="CardColor">#141B29</Color>
+  <Color x:Key="BorderColor">#253047</Color>
+  <Color x:Key="BorderStrongColor">#33405C</Color>
+  <Color x:Key="TextPrimaryColor">#E8EDF5</Color>
+  <Color x:Key="TextSecondaryColor">#93A0B6</Color>
+  <Color x:Key="TextFaintColor">#5C6A80</Color>
+  <Color x:Key="AccentColor">#8B5CF6</Color>
+  <Color x:Key="AccentColor2">#22D3EE</Color>
+  <Color x:Key="AccentSoftColor">#2A2245</Color>
+  <Color x:Key="SuccessColor">#34D399</Color>
+  <Color x:Key="WarningColor">#FBBF24</Color>
+  <Color x:Key="DangerColor">#F87171</Color>
+  <Color x:Key="IdleColor">#5C6A80</Color>
+
+  <!-- ===================== Brushes ===================== -->
+  <SolidColorBrush x:Key="BackgroundBrush" Color="{StaticResource BgColor}" />
+  <SolidColorBrush x:Key="SurfaceBrush" Color="{StaticResource SurfaceColor}" />
+  <SolidColorBrush x:Key="SurfaceAltBrush" Color="{StaticResource SurfaceAltColor}" />
+  <SolidColorBrush x:Key="CardBrush" Color="{StaticResource CardColor}" />
+  <SolidColorBrush x:Key="BorderBrush" Color="{StaticResource BorderColor}" />
+  <SolidColorBrush x:Key="BorderStrongBrush" Color="{StaticResource BorderStrongColor}" />
+  <SolidColorBrush x:Key="TextPrimaryBrush" Color="{StaticResource TextPrimaryColor}" />
+  <SolidColorBrush x:Key="TextSecondaryBrush" Color="{StaticResource TextSecondaryColor}" />
+  <SolidColorBrush x:Key="TextFaintBrush" Color="{StaticResource TextFaintColor}" />
+  <SolidColorBrush x:Key="AccentBrush" Color="{StaticResource AccentColor}" />
+  <SolidColorBrush x:Key="AccentBrush2" Color="{StaticResource AccentColor2}" />
+  <SolidColorBrush x:Key="AccentSoftBrush" Color="{StaticResource AccentSoftColor}" />
+  <SolidColorBrush x:Key="SuccessBrush" Color="{StaticResource SuccessColor}" />
+  <SolidColorBrush x:Key="WarningBrush" Color="{StaticResource WarningColor}" />
+  <SolidColorBrush x:Key="DangerBrush" Color="{StaticResource DangerColor}" />
+  <SolidColorBrush x:Key="IdleBrush" Color="{StaticResource IdleColor}" />
+  <SolidColorBrush x:Key="WhiteBrush" Color="White" />
+  <SolidColorBrush x:Key="BlackBrush" Color="Black" />
+
+  <LinearGradientBrush x:Key="AccentGradient" StartPoint="0%,0%" EndPoint="100%,100%">
+    <GradientStop Offset="0" Color="#8B5CF6" />
+    <GradientStop Offset="1" Color="#6366F1" />
+  </LinearGradientBrush>
+
+  <LinearGradientBrush x:Key="CyanGradient" StartPoint="0%,0%" EndPoint="100%,100%">
+    <GradientStop Offset="0" Color="#22D3EE" />
+    <GradientStop Offset="1" Color="#34D399" />
+  </LinearGradientBrush>
+
+  <LinearGradientBrush x:Key="DangerGradient" StartPoint="0%,0%" EndPoint="100%,100%">
+    <GradientStop Offset="0" Color="#F87171" />
+    <GradientStop Offset="1" Color="#FB7185" />
+  </LinearGradientBrush>
+
+  <!-- ===================== Slider keys (custom template) ===================== -->
+  <SolidColorBrush x:Key="SliderTrackBrush" Color="{StaticResource BorderColor}" />
+  <SolidColorBrush x:Key="SliderValueBrush" Color="{StaticResource AccentColor}" />
+  <SolidColorBrush x:Key="SliderThumbBrush" Color="#FFFFFF" />
+  <SolidColorBrush x:Key="ThumbBrush" Color="#FFFFFF" />
+
+  <!-- ===================== Typography ===================== -->
+  <FontFamily x:Key="UiFont">Inter</FontFamily>
+  <FontFamily x:Key="MonoFont">Cascadia Mono, Consolas</FontFamily>
+
+</ResourceDictionary>

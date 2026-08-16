@@ -1,0 +1,8 @@
+# .NET build artifacts
+bin/
+obj/
+publish/
+
+# Rider / VS
+.vs/
+*.user

@@ -1,0 +1,416 @@
+<Styles xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+  <!-- ============================ Base ============================ -->
+  <Style Selector="Window">
+    <Setter Property="FontFamily" Value="{DynamicResource UiFont}" />
+    <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+  </Style>
+
+  <Style Selector="TextBlock">
+    <Setter Property="FontFamily" Value="{DynamicResource UiFont}" />
+  </Style>
+
+  <!-- ============================ Cards ============================ -->
+  <Style Selector="Border.card">
+    <Setter Property="Background" Value="{DynamicResource CardBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="16" />
+    <Setter Property="Padding" Value="18" />
+  </Style>
+
+  <Style Selector="TextBlock.sectionTitle">
+    <Setter Property="FontSize" Value="10.5" />
+    <Setter Property="FontWeight" Value="Bold" />
+    <Setter Property="LetterSpacing" Value="2" />
+    <Setter Property="Foreground" Value="{DynamicResource TextFaintBrush}" />
+  </Style>
+
+  <Style Selector="TextBlock.sectionLabel">
+    <Setter Property="FontSize" Value="12.5" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+  </Style>
+
+  <Style Selector="TextBlock.valueLabel">
+    <Setter Property="FontFamily" Value="{DynamicResource MonoFont}" />
+    <Setter Property="FontSize" Value="14" />
+    <Setter Property="FontWeight" Value="Bold" />
+    <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+  </Style>
+
+  <Style Selector="Border.chip">
+    <Setter Property="Background" Value="{DynamicResource SurfaceAltBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="999" />
+  </Style>
+
+  <!-- ============================ Buttons ============================ -->
+  <Style Selector="Button.acBtn">
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="10" />
+    <Setter Property="Padding" Value="14,9" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="FontSize" Value="13" />
+    <Setter Property="Cursor" Value="Hand" />
+    <Setter Property="Template">
+      <ControlTemplate TargetType="Button">
+        <Border x:Name="Root"
+                Background="{TemplateBinding Background}"
+                BorderBrush="{TemplateBinding BorderBrush}"
+                BorderThickness="{TemplateBinding BorderThickness}"
+                CornerRadius="{TemplateBinding CornerRadius}"
+                Padding="{TemplateBinding Padding}">
+          <Border.RenderTransform>
+            <ScaleTransform />
+          </Border.RenderTransform>
+          <ContentPresenter Content="{TemplateBinding Content}"
+                            ContentTemplate="{TemplateBinding ContentTemplate}"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            FontSize="{TemplateBinding FontSize}"
+                            FontWeight="{TemplateBinding FontWeight}"
+                            Foreground="{TemplateBinding Foreground}" />
+        </Border>
+      </ControlTemplate>
+    </Setter>
+  </Style>
+
+  <Style Selector="Button.acBtn /template/ Border#Root">
+    <Setter Property="Transitions">
+      <Transitions>
+        <BrushTransition Property="Background" Duration="0:0:0.15" />
+        <BrushTransition Property="BorderBrush" Duration="0:0:0.15" />
+        <DoubleTransition Property="Opacity" Duration="0:0:0.15" />
+        <DoubleTransition Property="ScaleTransform.ScaleX" Duration="0:0:0.12" Easing="CubicEaseOut" />
+        <DoubleTransition Property="ScaleTransform.ScaleY" Duration="0:0:0.12" Easing="CubicEaseOut" />
+      </Transitions>
+    </Setter>
+  </Style>
+
+  <Style Selector="Button.acBtn:pointerover">
+    <Setter Property="Background" Value="{DynamicResource SurfaceAltBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource BorderStrongBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+  </Style>
+
+  <Style Selector="Button.acBtn:pressed /template/ Border#Root">
+    <Setter Property="ScaleTransform.ScaleX" Value="0.97" />
+    <Setter Property="ScaleTransform.ScaleY" Value="0.97" />
+  </Style>
+
+  <!-- Accent (gradient) variant -->
+  <Style Selector="Button.acBtn.accent">
+    <Setter Property="Background" Value="{DynamicResource AccentGradient}" />
+    <Setter Property="Foreground" Value="{DynamicResource WhiteBrush}" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="CornerRadius" Value="12" />
+  </Style>
+  <Style Selector="Button.acBtn.accent:pointerover">
+    <Setter Property="Background" Value="{DynamicResource AccentGradient}" />
+    <Setter Property="Foreground" Value="{DynamicResource WhiteBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource BorderStrongBrush}" />
+  </Style>
+
+  <!-- Danger variant -->
+  <Style Selector="Button.acBtn.danger">
+    <Setter Property="Background" Value="{DynamicResource DangerGradient}" />
+    <Setter Property="Foreground" Value="{DynamicResource WhiteBrush}" />
+    <Setter Property="BorderThickness" Value="0" />
+  </Style>
+  <Style Selector="Button.acBtn.danger:pointerover">
+    <Setter Property="Background" Value="{DynamicResource DangerGradient}" />
+    <Setter Property="Foreground" Value="{DynamicResource WhiteBrush}" />
+  </Style>
+
+  <!-- Small variant -->
+  <Style Selector="Button.acBtn.small">
+    <Setter Property="Padding" Value="10,6" />
+    <Setter Property="FontSize" Value="12" />
+    <Setter Property="CornerRadius" Value="9" />
+  </Style>
+
+  <!-- Title-bar icon variant -->
+  <Style Selector="Button.acBtn.iconBtn">
+    <Setter Property="Width" Value="38" />
+    <Setter Property="Height" Value="30" />
+    <Setter Property="Padding" Value="0" />
+    <Setter Property="CornerRadius" Value="8" />
+    <Setter Property="BorderThickness" Value="0" />
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+    <Setter Property="FontSize" Value="13" />
+    <Setter Property="FontWeight" Value="Bold" />
+  </Style>
+  <Style Selector="Button.acBtn.iconBtn:pointerover">
+    <Setter Property="Background" Value="{DynamicResource SurfaceAltBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+  </Style>
+  <Style Selector="Button.acBtn.iconBtn.close:pointerover">
+    <Setter Property="Background" Value="{DynamicResource DangerBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource WhiteBrush}" />
+  </Style>
+
+  <!-- ============================ Segmented control ============================ -->
+  <Style Selector="ListBox.segmented">
+    <Setter Property="Background" Value="{DynamicResource SurfaceAltBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="12" />
+    <Setter Property="Padding" Value="4" />
+  </Style>
+
+  <Style Selector="ListBox.segmented > ListBoxItem">
+    <Setter Property="Template">
+      <ControlTemplate TargetType="ListBoxItem">
+        <Border x:Name="ItemBorder" Background="Transparent" CornerRadius="9" Padding="10,8">
+          <ContentPresenter Content="{TemplateBinding Content}"
+                            ContentTemplate="{TemplateBinding ContentTemplate}"
+                            HorizontalAlignment="Center"
+                            VerticalAlignment="Center"
+                            FontSize="{TemplateBinding FontSize}"
+                            FontWeight="{TemplateBinding FontWeight}"
+                            Foreground="{TemplateBinding Foreground}" />
+        </Border>
+      </ControlTemplate>
+    </Setter>
+    <Setter Property="Background" Value="Transparent" />
+    <Setter Property="Foreground" Value="{DynamicResource TextSecondaryBrush}" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="FontSize" Value="13" />
+    <Setter Property="Cursor" Value="Hand" />
+  </Style>
+
+  <Style Selector="ListBox.segmented > ListBoxItem /template/ Border#ItemBorder">
+    <Setter Property="Transitions">
+      <Transitions>
+        <BrushTransition Property="Background" Duration="0:0:0.18" />
+      </Transitions>
+    </Setter>
+  </Style>
+
+  <Style Selector="ListBox.segmented > ListBoxItem:selected">
+    <Setter Property="Foreground" Value="{DynamicResource WhiteBrush}" />
+  </Style>
+  <Style Selector="ListBox.segmented > ListBoxItem:selected /template/ Border#ItemBorder">
+    <Setter Property="Background" Value="{DynamicResource AccentGradient}" />
+  </Style>
+  <Style Selector="ListBox.segmented > ListBoxItem:pointerover">
+    <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+  </Style>
+
+  <!-- ============================ Slider ============================ -->
+  <Style Selector="Slider.acSlider">
+    <Setter Property="Height" Value="30" />
+    <Setter Property="Cursor" Value="Hand" />
+    <Setter Property="Template">
+      <ControlTemplate TargetType="Slider">
+        <Grid VerticalAlignment="Center">
+          <Track Name="PART_Track"
+                 Minimum="{TemplateBinding Minimum}"
+                 Maximum="{TemplateBinding Maximum}"
+                 Value="{TemplateBinding Value}"
+                 Orientation="Horizontal"
+                 IsDirectionReversed="False">
+            <Track.DecreaseButton>
+              <RepeatButton Name="PART_DecreaseButton"
+                            VerticalAlignment="Stretch"
+                            IsTabStop="False"
+                            Focusable="False"
+                            Background="{DynamicResource SliderValueBrush}">
+                <RepeatButton.Template>
+                  <ControlTemplate TargetType="RepeatButton">
+                    <Border Background="{TemplateBinding Background}"
+                            Height="4"
+                            CornerRadius="2.5"
+                            VerticalAlignment="Center" />
+                  </ControlTemplate>
+                </RepeatButton.Template>
+              </RepeatButton>
+            </Track.DecreaseButton>
+            <Track.IncreaseButton>
+              <RepeatButton Name="PART_IncreaseButton"
+                            VerticalAlignment="Stretch"
+                            IsTabStop="False"
+                            Focusable="False"
+                            Background="{DynamicResource SliderTrackBrush}">
+                <RepeatButton.Template>
+                  <ControlTemplate TargetType="RepeatButton">
+                    <Border Background="{TemplateBinding Background}"
+                            Height="4"
+                            CornerRadius="2.5"
+                            VerticalAlignment="Center" />
+                  </ControlTemplate>
+                </RepeatButton.Template>
+              </RepeatButton>
+            </Track.IncreaseButton>
+            <Track.Thumb>
+              <Thumb Name="PART_Thumb" IsTabStop="False" Focusable="False">
+                <Thumb.Template>
+                  <ControlTemplate TargetType="Thumb">
+                    <Ellipse Width="18"
+                             Height="18"
+                             Fill="{DynamicResource ThumbBrush}"
+                             Stroke="{DynamicResource AccentBrush}"
+                             StrokeThickness="2.5">
+                      <Ellipse.RenderTransform>
+                        <ScaleTransform />
+                      </Ellipse.RenderTransform>
+                    </Ellipse>
+                  </ControlTemplate>
+                </Thumb.Template>
+              </Thumb>
+            </Track.Thumb>
+          </Track>
+        </Grid>
+      </ControlTemplate>
+    </Setter>
+  </Style>
+
+  <Style Selector="Slider.acSlider /template/ Ellipse">
+    <Setter Property="Transitions">
+      <Transitions>
+        <DoubleTransition Property="ScaleTransform.ScaleX" Duration="0:0:0.12" Easing="CubicEaseOut" />
+        <DoubleTransition Property="ScaleTransform.ScaleY" Duration="0:0:0.12" Easing="CubicEaseOut" />
+      </Transitions>
+    </Setter>
+  </Style>
+  <Style Selector="Slider.acSlider:pointerover /template/ Ellipse">
+    <Setter Property="ScaleTransform.ScaleX" Value="1.15" />
+    <Setter Property="ScaleTransform.ScaleY" Value="1.15" />
+  </Style>
+  <Style Selector="Slider.acSlider:pressed /template/ Ellipse">
+    <Setter Property="ScaleTransform.ScaleX" Value="1.25" />
+    <Setter Property="ScaleTransform.ScaleY" Value="1.25" />
+  </Style>
+
+  <!-- ============================ TextBox ============================ -->
+  <Style Selector="TextBox.acTextBox">
+    <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="10" />
+    <Setter Property="Padding" Value="12,8" />
+    <Setter Property="CaretBrush" Value="{DynamicResource AccentBrush}" />
+    <Setter Property="SelectionBrush" Value="{DynamicResource AccentBrush}" />
+    <Setter Property="SelectionForegroundBrush" Value="{DynamicResource WhiteBrush}" />
+    <Setter Property="FontSize" Value="13" />
+  </Style>
+  <Style Selector="TextBox.acTextBox:focus">
+    <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+  </Style>
+  <Style Selector="TextBox.acTextBox:pointerover">
+    <Setter Property="BorderBrush" Value="{DynamicResource BorderStrongBrush}" />
+  </Style>
+
+  <!-- ============================ ComboBox ============================ -->
+  <Style Selector="ComboBox.acComboBox">
+    <Setter Property="Background" Value="{DynamicResource SurfaceBrush}" />
+    <Setter Property="Foreground" Value="{DynamicResource TextPrimaryBrush}" />
+    <Setter Property="BorderBrush" Value="{DynamicResource BorderBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="CornerRadius" Value="10" />
+    <Setter Property="Padding" Value="10,7" />
+    <Setter Property="FontSize" Value="13" />
+  </Style>
+  <Style Selector="ComboBox.acComboBox:pointerover">
+    <Setter Property="BorderBrush" Value="{DynamicResource BorderStrongBrush}" />
+  </Style>
+
+  <!-- ============================ Animations ============================ -->
+  <Style Selector="Ellipse.pulseDot">
+    <Style.Animations>
+      <Animation Duration="0:0:0.9" IterationCount="Infinite" Easing="EaseInOut">
+        <KeyFrame Cue="0%">
+          <Setter Property="Opacity" Value="1" />
+          <Setter Property="ScaleTransform.ScaleX" Value="1" />
+          <Setter Property="ScaleTransform.ScaleY" Value="1" />
+        </KeyFrame>
+        <KeyFrame Cue="100%">
+          <Setter Property="Opacity" Value="0.2" />
+          <Setter Property="ScaleTransform.ScaleX" Value="0.55" />
+          <Setter Property="ScaleTransform.ScaleY" Value="0.55" />
+        </KeyFrame>
+      </Animation>
+    </Style.Animations>
+  </Style>
+
+  <Style Selector="Ellipse.halo">
+    <Setter Property="Effect">
+      <BlurEffect Radius="26" />
+    </Setter>
+    <Setter Property="IsHitTestVisible" Value="False" />
+  </Style>
+  <Style Selector="Ellipse.halo">
+    <Style.Animations>
+      <Animation Duration="0:0:1.2" IterationCount="Infinite" Easing="EaseInOut">
+        <KeyFrame Cue="0%">
+          <Setter Property="Opacity" Value="0.35" />
+        </KeyFrame>
+        <KeyFrame Cue="50%">
+          <Setter Property="Opacity" Value="0.85" />
+        </KeyFrame>
+        <KeyFrame Cue="100%">
+          <Setter Property="Opacity" Value="0.35" />
+        </KeyFrame>
+      </Animation>
+    </Style.Animations>
+  </Style>
+
+  <!-- One-shot entrance for the window -->
+  <Style Selector="Grid.entrance">
+    <Style.Animations>
+      <Animation Duration="0:0:0.35" FillMode="Both" Easing="CubicEaseOut">
+        <KeyFrame Cue="0%">
+          <Setter Property="Opacity" Value="0" />
+          <Setter Property="ScaleTransform.ScaleX" Value="0.97" />
+          <Setter Property="ScaleTransform.ScaleY" Value="0.97" />
+        </KeyFrame>
+        <KeyFrame Cue="100%">
+          <Setter Property="Opacity" Value="1" />
+          <Setter Property="ScaleTransform.ScaleX" Value="1" />
+          <Setter Property="ScaleTransform.ScaleY" Value="1" />
+        </KeyFrame>
+      </Animation>
+    </Style.Animations>
+  </Style>
+
+  <!-- One-shot card slide-in -->
+  <Style Selector="Grid.cardIn">
+    <Style.Animations>
+      <Animation Duration="0:0:0.24" FillMode="Both" Easing="CubicEaseOut">
+        <KeyFrame Cue="0%">
+          <Setter Property="Opacity" Value="0" />
+          <Setter Property="TranslateTransform.X" Value="16" />
+        </KeyFrame>
+        <KeyFrame Cue="100%">
+          <Setter Property="Opacity" Value="1" />
+          <Setter Property="TranslateTransform.X" Value="0" />
+        </KeyFrame>
+      </Animation>
+    </Style.Animations>
+  </Style>
+
+  <!-- Panel slide-down (advanced section) -->
+  <Style Selector="Border.panelIn">
+    <Style.Animations>
+      <Animation Duration="0:0:0.22" FillMode="Both" Easing="CubicEaseOut">
+        <KeyFrame Cue="0%">
+          <Setter Property="Opacity" Value="0" />
+          <Setter Property="TranslateTransform.Y" Value="-8" />
+        </KeyFrame>
+        <KeyFrame Cue="100%">
+          <Setter Property="Opacity" Value="1" />
+          <Setter Property="TranslateTransform.Y" Value="0" />
+        </KeyFrame>
+      </Animation>
+    </Style.Animations>
+  </Style>
+
+</Styles>
