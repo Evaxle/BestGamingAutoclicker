@@ -21,12 +21,12 @@ for in-game use.
 - Modern UI: acrylic blur window, entrance / card / panel animations, pulsing
   status indicators, gradient controls.
 
-## Build (Windows)
+## Build (Windows or Linux)
 
 Requires the **.NET 10 SDK** (https://dotnet.microsoft.com/download/dotnet/10.0).
 
 ```bash
-cd BestAutoClicker/src/BestAutoClicker
+cd src/BestAutoClicker
 dotnet restore
 dotnet build -c Release
 ```
@@ -34,20 +34,22 @@ dotnet build -c Release
 ## Publish a single-file exe (recommended)
 
 ```bash
-cd BestAutoClicker/src/BestAutoClicker
+cd src/BestAutoClicker
 dotnet publish -c Release -r win-x64 --self-contained true -o publish
 ```
 
 Output: `publish/BestAutoClicker.exe` — copy that single file to any Windows 10/11 PC.
+It is fully self-contained (the .NET runtime and all native libraries are
+bundled inside the exe), so no .NET installation is needed on the target PC.
 
-The exe is built with the manifest set to **run as administrator** (UAC prompt
-on launch). This is deliberate: it guarantees the global input hooks and
-`SendInput` clicks reach games that run elevated.
+The exe runs with **normal user privileges — no administrator / UAC prompt
+required** (`asInvoker` in the manifest). One trade-off: because the app is not
+elevated, its input hooks and clicks cannot reach games that themselves run
+*elevated* (as administrator). Non-elevated games work normally.
 
-> Note: building the single-file Windows publish must be done on Windows (or a
-> Windows build agent). On a Linux machine you can still `dotnet build` the
-> project to validate compilation, but the final `win-x64` self-contained
-> publish should be produced on Windows.
+> This single-file Windows build works from a **Linux** machine too — the .NET
+> SDK downloads the `win-x64` runtime packs and embeds the icon + manifest
+> cross-platform. No Windows build agent required.
 
 ## Data / profiles location
 
@@ -72,8 +74,3 @@ profile. A default profile is created automatically on first run.
   clicks via `SendInput`, and uses the stop-check sampling to idle the moment
   you release.
 - `Services/ProfileService.cs` — JSON profile persistence.
-
-## Original C++ version
-
-The legacy `AutoClicker.cpp` / `ac_engine/` Win32 build is still in the repo
-root. This .NET version is a full feature-equivalent replacement.
